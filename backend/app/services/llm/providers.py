@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+
+import httpx
+
+from app.core.config import settings
+from app.services.llm.base import ChatMessage, ChatProvider
+
+_http: httpx.AsyncClient | None = None
+
+
+def http_client() -> httpx.AsyncClient:
+    global _http
+    if _http is None or _http.is_closed:
+        _http = httpx.AsyncClient(timeout=90)
+    return _http
+
+
+async def _post_with_retry(url: str, **kwargs) -> httpx.Response:
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp = await http_client().post(url, **kwargs)
+            if resp.status_code in {429, 500, 502, 503, 504}:
+                await asyncio.sleep(0.4 * (attempt + 1))
+                last_exc = httpx.HTTPStatusError(
+                    f"retryable {resp.status_code}", request=resp.request, response=resp
+                )
+                continue
+            resp.raise_for_status()
+            return resp
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            await asyncio.sleep(0.4 * (attempt + 1))
+    assert last_exc is not None
+    raise last_exc
+
+
+class OpenAICompatibleProvider:
+    name = "openai-compatible"
+
+    def __init__(self, api_key: str, base_url: str, model: str, name: str):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.name = name
+
+    async def complete(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.6,
+        json_mode: bool = True,
+        max_tokens: int = 2048,
+    ) -> str:
+        payload = {
+            "model": self.model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+            # DeepSeek rejects json_object unless the prompt contains the word "json"
+            blob = "\n".join(m["content"] for m in payload["messages"])
+            if "json" not in blob.lower():
+                if payload["messages"] and payload["messages"][0]["role"] == "system":
+                    payload["messages"][0]["content"] += "\n只输出合法 JSON。"
+                else:
+                    payload["messages"].insert(0, {"role": "system", "content": "只输出合法 JSON。"})
+            # deepseek-v4 thinking can exhaust max_tokens and leave content empty
+            if self.name == "deepseek":
+                payload["thinking"] = {"type": "disabled"}
+
+        async def _request(body: dict) -> str:
+            resp = await _post_with_retry(
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json=body,
+            )
+            data = resp.json()
+            msg = ((data.get("choices") or [{}])[0].get("message") or {})
+            return str(msg.get("content") or "")
+
+        content = await _request(payload)
+        if json_mode and not content.strip() and self.name == "deepseek":
+            retry = dict(payload)
+            retry["thinking"] = {"type": "disabled"}
+            retry["max_tokens"] = max(max_tokens, 8192)
+            content = await _request(retry)
+        return content
+
+
+class AnthropicProvider:
+    name = "claude"
+
+    def __init__(self):
+        self.api_key = settings.anthropic_api_key
+        self.model = settings.anthropic_model
+
+    async def complete(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.6,
+        json_mode: bool = True,
+        max_tokens: int = 2048,
+    ) -> str:
+        system = ""
+        body_msgs = []
+        for m in messages:
+            if m.role == "system":
+                system += m.content + "\n"
+            else:
+                body_msgs.append({"role": m.role, "content": m.content})
+        if json_mode:
+            system += "\n只输出合法 JSON。"
+        resp = await _post_with_retry(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "system": system.strip(),
+                "messages": body_msgs,
+            },
+        )
+        data = resp.json()
+        return "".join(part.get("text", "") for part in data.get("content", []))
+
+
+class MockProvider:
+    name = "mock"
+    model = "mock-local"
+
+    async def complete(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.6,
+        json_mode: bool = True,
+        max_tokens: int = 2048,
+    ) -> str:
+        blob = "\n".join(m.content for m in messages)
+        return json.dumps(_mock_json(blob), ensure_ascii=False)
+
+
+def _first_sentences(text: str, n: int = 6) -> list[str]:
+    parts = re.split(r"[。！？\n]", text)
+    out = [p.strip() for p in parts if 8 <= len(p.strip()) <= 80]
+    return out[:n] or [text[:40] or "示例知识点"]
+
+
+def _mock_json(blob: str) -> dict:
+    low = blob.lower()
+    sentences = _first_sentences(blob)
+    quote = sentences[0]
+    answer = quote[-12:] if len(quote) > 12 else quote
+    if "suggested_points" in low or ("unsuitable" in low and "suggested_types" in low):
+        return {
+            "unsuitable": len(quote) < 10,
+            "reason": "" if len(quote) >= 10 else "信息过少",
+            "suitable_skills": ["理解", "识记"],
+            "suggested_types": ["single_choice", "true_false"],
+            "suggested_points": sentences[:3],
+            "summary": quote[:60],
+        }
+    if "判断科目" in blob or ("confidence" in low and "civics" in low):
+        if any(k in blob for k in ["Python", "代码", "算法", "函数", "API", "HTTP"]):
+            sub = "it"
+        elif any(k in blob for k in ["历史", "朝代", "革命"]):
+            sub = "history"
+        else:
+            sub = "general"
+        return {"subject": sub, "confidence": 0.7, "reason": "关键词匹配"}
+    if "answer_type" in low or "预置答案锚点" in blob and "不要输出完整选择题" in blob:
+        items = []
+        for s in sentences[:3]:
+            items.append(
+                {
+                    "quote": s,
+                    "answer": s[-10:] if len(s) > 10 else s,
+                    "answer_type": "claim",
+                    "knowledge_tags": ["材料要点"],
+                    "suggested_micro_skill": "detail",
+                }
+            )
+        return {"items": items or [{"quote": quote, "answer": answer, "answer_type": "claim", "knowledge_tags": ["要点"], "suggested_micro_skill": "gist"}]}
+    if "不要输出干扰项" in blob or "correct_text" in low:
+        qtype = "single_choice"
+        if "true_false" in blob:
+            qtype = "true_false"
+        if "fill_blank" in blob:
+            qtype = "fill_blank"
+        payload = {
+            "stem": f"根据材料，下列关于「{answer}」的说法正确的是？",
+            "type": qtype,
+            "answer": {"keys": ["A"], "texts": [answer]},
+            "correct_text": answer,
+            "explanation": f"原文指出：{quote}",
+            "knowledge_tags": ["材料要点"],
+            "micro_skill": "gist",
+            "cognitive_level": "understand",
+            "source_quote": quote,
+        }
+        if qtype == "true_false":
+            payload["stem"] = f"材料表明：{quote}。"
+            payload["answer"] = {"keys": ["true"], "texts": ["true"]}
+            payload["correct_text"] = "true"
+        if qtype == "fill_blank":
+            payload["stem"] = quote.replace(answer, "______") if answer in quote else "材料中的关键结论是______。"
+            payload["answer"] = {"keys": [], "texts": [answer]}
+        return payload
+    if "candidates" in low or "过生成" in blob or "干扰项候选" in blob:
+        return {
+            "candidates": [
+                {"text": f"{answer}的前提条件", "error_type": "范围偏移", "rationale": "把必要条件说成充分条件"},
+                {"text": f"与{answer}同类的其他概念", "error_type": "同维混淆", "rationale": "同一类别不同功能"},
+                {"text": f"{quote[:8]}的次要结果", "error_type": "部分正确", "rationale": "前半正确后半偷换"},
+                {"text": "材料中另一处真实概念但场景不同", "error_type": "张冠李戴", "rationale": "真实概念用错场景"},
+                {"text": f"{answer}增加约25%", "error_type": "数值偏移", "rationale": "数值偏移约25%"},
+                {"text": f"并非{answer}而是其对立面", "error_type": "同维混淆", "rationale": "对立概念"},
+                {"text": f"{answer}仅在例外情况下成立", "error_type": "范围偏移", "rationale": "局部当全局"},
+                {"text": sentences[1][-12:] if len(sentences) > 1 else "相关但错误的概括", "error_type": "张冠李戴", "rationale": "来自材料其他句"},
+            ]
+        }
+    if "too_easy_keys" in low or "一眼就能排除" in blob:
+        return {"too_easy_keys": [], "replacements": {}, "guessable": False, "notes": "选项均可保留"}
+    if "usability" in low or "可用性检视" in blob:
+        return {
+            "fluency": 4,
+            "accuracy": 4,
+            "complexity": 3,
+            "usability": 4,
+            "answer_exists": True,
+            "unique_correct": True,
+            "leak": False,
+            "controversial": False,
+            "guessable": False,
+            "comment": "可用于练习",
+        }
+    return {"ok": True, "summary": quote}

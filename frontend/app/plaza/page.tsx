@@ -1,0 +1,96 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { api, getToken } from "@/lib/api";
+
+type Item = {
+  id: string;
+  title: string;
+  description?: string;
+  category: string;
+  question_count: number;
+  likes: number;
+  plays: number;
+  is_builtin: boolean;
+  avg_rating: number;
+  favorited: boolean;
+};
+
+export default function PlazaPage() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [q, setQ] = useState("");
+  const [category, setCategory] = useState("");
+  const [sort, setSort] = useState("hot");
+
+  async function load() {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (category) params.set("category", category);
+    params.set("sort", sort);
+    setItems(await api<Item[]>(`/plaza?${params.toString()}`));
+  }
+
+  useEffect(() => {
+    load();
+  }, [category, sort]);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex-1">
+          <h1 className="text-2xl font-semibold">社区广场</h1>
+          <p className="text-sm text-slate-500">公开题库与系统预置题库，可收藏、评分、复制练习。</p>
+        </div>
+        <input className="input max-w-xs" placeholder="搜索标题" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
+        <select className="input w-auto" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="">全部分类</option>
+          {["常识", "考公", "考研", "IT", "历史", "自定义"].map((c) => (
+            <option key={c}>{c}</option>
+          ))}
+        </select>
+        <select className="input w-auto" value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="hot">热门</option>
+          <option value="new">最新</option>
+        </select>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {items.map((it) => (
+          <div key={it.id} className="card p-5">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <Link href={`/quizzes/${it.id}`} className="font-medium hover:text-brand-700">
+                  {it.title}
+                </Link>
+                <p className="mt-1 text-sm text-slate-500">{it.description}</p>
+              </div>
+              {it.is_builtin && <span className="badge">内置</span>}
+            </div>
+            <p className="mt-3 text-xs text-slate-500">
+              {it.category} · {it.question_count} 题 · {it.plays} 次练习 · {it.likes} 收藏 · {it.avg_rating.toFixed(1)} 分
+            </p>
+            <div className="mt-3 flex gap-2">
+              <Link className="btn-primary" href={`/practice/${it.id}`}>
+                刷题
+              </Link>
+              <Link className="btn-ghost" href={`/quizzes/${it.id}`}>
+                查看
+              </Link>
+              {getToken() && (
+                <button
+                  className="btn-ghost"
+                  onClick={async () => {
+                    await api(`/quizzes/${it.id}/favorite`, { method: "POST" });
+                    load();
+                  }}
+                >
+                  {it.favorited ? "已收藏" : "收藏"}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
