@@ -16,6 +16,7 @@ from app.models.document import Document
 from app.models.favorite import Favorite
 from app.models.generation_job import GenerationJob
 from app.models.question import Question
+from app.models.question_favorite import QuestionFavorite
 from app.models.quiz_rating import QuizRating
 from app.models.quiz_set import QuizSet
 from app.models.user import User
@@ -44,6 +45,17 @@ def _q_out(q: Question) -> dict:
         "quality_scores": q.quality_scores,
         "needs_review": q.needs_review,
     }
+
+
+async def _discard_quiz(db: AsyncSession, quiz: QuizSet, job: GenerationJob | None = None) -> None:
+    if job is not None:
+        job.quiz_set_id = None
+    elif quiz.generation_job_id:
+        linked = await db.get(GenerationJob, quiz.generation_job_id)
+        if linked:
+            linked.quiz_set_id = None
+    quiz.generation_job_id = None
+    await db.delete(quiz)
 
 
 def _quiz_out(quiz: QuizSet, extra: dict | None = None) -> dict:
@@ -124,7 +136,7 @@ async def generate(
         except Exception as exc:
             job.status = "failed"
             job.error = "任务队列暂不可用"
-            quiz.status = "failed"
+            await _discard_quiz(db, quiz, job)
             await db.commit()
             raise AppError("任务队列暂不可用，请稍后重试", code=503, status_code=503) from exc
     await incr_quota(user.id, user.daily_gen_quota)
@@ -140,7 +152,7 @@ async def my_favorites(
     out = []
     for fav in rows.scalars().all():
         quiz = await db.get(QuizSet, fav.quiz_set_id)
-        if quiz:
+        if quiz and quiz.status != "failed":
             out.append(_quiz_out(quiz))
     return ok(out)
 
@@ -155,7 +167,14 @@ async def my_quizzes(
         .where(QuizSet.creator_id == user.id)
         .order_by(QuizSet.created_at.desc())
     )
-    return ok([_quiz_out(q) for q in rows.scalars().all()])
+    quizzes = list(rows.scalars().all())
+    failed = [q for q in quizzes if q.status == "failed"]
+    if failed:
+        for q in failed:
+            await _discard_quiz(db, q)
+        await db.commit()
+    visible = [q for q in quizzes if q.status != "failed"]
+    return ok([_quiz_out(q) for q in visible])
 
 
 @router.get("/{quiz_id}")
@@ -172,6 +191,17 @@ async def get_quiz(
         select(Question).where(Question.quiz_set_id == quiz.id).order_by(Question.created_at)
     )
     questions = [_q_out(q) for q in qrows.scalars().all()]
+    fav_ids: set[str] = set()
+    if user and questions:
+        fav_rows = await db.execute(
+            select(QuestionFavorite.question_id).where(
+                QuestionFavorite.user_id == user.id,
+                QuestionFavorite.question_id.in_([q["id"] for q in questions]),
+            )
+        )
+        fav_ids = set(fav_rows.scalars().all())
+    for q in questions:
+        q["favorited"] = q["id"] in fav_ids
     is_owner = bool(user and quiz.creator_id == user.id)
     strip = (purpose != "review" or not is_owner) or hide_answer
     if strip:
@@ -267,6 +297,33 @@ async def delete_question(
     return ok(True)
 
 
+@router.post("/questions/{question_id}/favorite")
+async def toggle_question_favorite(
+    question_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = await db.get(Question, question_id)
+    if not q:
+        raise AppError("题目不存在", code=404, status_code=404)
+    quiz = await db.get(QuizSet, q.quiz_set_id)
+    assert_quiz_accessible(quiz, user)
+    existing = await db.get(QuestionFavorite, (user.id, question_id))
+    if existing:
+        await db.delete(existing)
+        await db.commit()
+        favorited = False
+    else:
+        db.add(
+            QuestionFavorite(
+                user_id=user.id, question_id=question_id, quiz_set_id=q.quiz_set_id
+            )
+        )
+        await db.commit()
+        favorited = True
+    return ok({"favorited": favorited})
+
+
 @router.post("/questions/{question_id}/harden")
 async def harden_question(
     question_id: str,
@@ -288,7 +345,7 @@ async def harden_question(
         "type": q.type,
         "correct_text": (q.answer or {}).get("texts", [""])[0]
         if q.type != "true_false"
-        else "true",
+        else ((q.answer or {}).get("keys") or ["对"])[0],
         "answer": q.answer,
         "explanation": q.explanation,
         "knowledge_tags": q.knowledge_tags,

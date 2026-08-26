@@ -46,10 +46,10 @@ export default function ProfilePage() {
         <h2 className="mb-3 font-medium">我创建的</h2>
         <div className="grid gap-3 md:grid-cols-2">
           {quizzes.map((q) => (
-            <Link key={q.id} href={`/quizzes/${q.id}`} className="card p-4 hover:border-brand-500">
-              <div className="flex justify-between">
-                <strong>{q.title}</strong>
-                <span className="badge">{q.status}</span>
+            <Link key={q.id} href={`/quizzes/${q.id}`} className="card p-4 hover:border-brand-500 active:border-brand-500">
+              <div className="flex items-start justify-between gap-2">
+                <strong className="min-w-0 break-words">{q.title}</strong>
+                <span className="badge shrink-0">{q.status}</span>
               </div>
               <p className="mt-2 text-sm text-slate-500">
                 {q.category} · {q.question_count} 题 · {q.visibility === "public" ? "公开" : "私密"}
@@ -60,10 +60,14 @@ export default function ProfilePage() {
         </div>
       </section>
       <section>
-        <h2 className="mb-3 font-medium">我收藏的</h2>
-        <div className="flex flex-wrap gap-2">
+        <h2 className="mb-3 font-medium">收藏的题库</h2>
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           {favs.map((q) => (
-            <Link key={q.id} href={`/quizzes/${q.id}`} className="badge">
+            <Link
+              key={q.id}
+              href={`/quizzes/${q.id}`}
+              className="border-b-2 border-transparent pb-1 text-sm text-slate-600 transition hover:border-brand-600 hover:text-brand-700"
+            >
               {q.title}
             </Link>
           ))}
@@ -74,9 +78,9 @@ export default function ProfilePage() {
         <h2 className="mb-3 font-medium">刷题记录</h2>
         <ul className="space-y-2 text-sm">
           {plays.map((p) => (
-            <li key={p.id} className="flex justify-between rounded-xl border border-slate-200 px-3 py-2">
-              <span>{p.title}</span>
-              <span>{p.score} 分</span>
+            <li key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2">
+              <span className="min-w-0 truncate">{p.title}</span>
+              <span className="shrink-0">{p.score} 分</span>
             </li>
           ))}
         </ul>

@@ -134,8 +134,9 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
                     }
                 )
 
-        allocs = allocate(len(key_items), blueprint)
-        key_items = key_items[: len(allocs)]
+        n_source = len(key_items)
+        allocs = allocate(n_source, blueprint)
+        key_items = [key_items[i % n_source] for i in range(len(allocs))] if key_items and allocs else []
         gen = generator_provider(subject)
         cri = critic_provider()
         job.models_used = {
@@ -200,7 +201,9 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         job.error = str(exc)
         job.status = "failed"
         if quiz:
-            quiz.status = "failed"
+            job.quiz_set_id = None
+            quiz.generation_job_id = None
+            await db.delete(quiz)
         await db.commit()
         try:
             await decr_quota(job.user_id)

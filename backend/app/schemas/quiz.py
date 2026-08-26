@@ -21,9 +21,8 @@ class QuizBlueprint(BaseModel):
     total_questions: int = Field(default=12, ge=1, le=40)
     type_mix: dict[str, float] = Field(
         default_factory=lambda: {
-            "single_choice": 0.7,
+            "single_choice": 0.8,
             "true_false": 0.2,
-            "fill_blank": 0.1,
         }
     )
     max_detail_ratio: float = Field(default=0.3, ge=0.1, le=1.0)

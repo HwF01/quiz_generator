@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, downloadAuth, getToken } from "@/lib/api";
+import { formatOptionLabel } from "@/lib/options";
+import { FavoriteButton } from "@/components/FavoriteButton";
 
 type Question = {
   id: string;
@@ -18,6 +20,7 @@ type Question = {
   source_span?: { quote?: string };
   quality_scores?: { usability?: number; answer_exists?: boolean };
   needs_review: boolean;
+  favorited?: boolean;
 };
 
 type Quiz = {
@@ -70,13 +73,33 @@ export default function QuizEditPage() {
     load();
   }
 
+  async function toggleFav(q: Question) {
+    try {
+      const data = await api<{ favorited: boolean }>(`/quizzes/questions/${q.id}/favorite`, {
+        method: "POST",
+      });
+      setQuiz((prev) =>
+        prev
+          ? {
+              ...prev,
+              questions: prev.questions.map((item) =>
+                item.id === q.id ? { ...item, favorited: data.favorited } : item
+              ),
+            }
+          : prev
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "收藏失败");
+    }
+  }
+
   if (!quiz) return <p>{msg || "加载中…"}</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
+          <h1 className="text-2xl font-semibold break-words">{quiz.title}</h1>
           <p className="text-sm text-slate-500">
             {quiz.category} · {quiz.subject} · {quiz.status}
           </p>
@@ -118,6 +141,11 @@ export default function QuizEditPage() {
               <span className="badge">{q.difficulty}</span>
               {q.needs_review && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">待审校</span>}
               {q.quality_scores?.usability && <span className="badge">可用性 {q.quality_scores.usability}/5</span>}
+              <FavoriteButton
+                className="ml-auto"
+                favorited={Boolean(q.favorited)}
+                onToggle={() => void toggleFav(q)}
+              />
             </div>
             <textarea
               className="input min-h-[72px]"
@@ -127,9 +155,15 @@ export default function QuizEditPage() {
             {q.options && (
               <ul className="mt-3 space-y-1 text-sm">
                 {q.options.map((o) => (
-                  <li key={o.key}>
-                    <strong className="mr-2">{o.key}.</strong>
-                    {o.text}
+                  <li key={o.key} className="break-words">
+                    {q.type === "true_false" ? (
+                      <strong className="mr-2">{formatOptionLabel(o, q.type, q.options)}</strong>
+                    ) : (
+                      <>
+                        <strong className="mr-2">{o.key}.</strong>
+                        {o.text}
+                      </>
+                    )}
                     {q.answer?.keys?.includes(o.key) && <span className="ml-2 text-green-700">正解</span>}
                     {q.distractor_rationale?.[o.key] && (
                       <span className="ml-2 text-slate-400">（{q.distractor_rationale[o.key]}）</span>
@@ -139,10 +173,10 @@ export default function QuizEditPage() {
               </ul>
             )}
             {q.source_span?.quote && (
-              <p className="mt-3 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">原文：{q.source_span.quote}</p>
+              <p className="mt-3 break-words rounded-lg bg-slate-50 p-2 text-xs text-slate-600">原文：{q.source_span.quote}</p>
             )}
-            <p className="mt-2 text-sm text-slate-600">解析：{q.explanation}</p>
-            <div className="mt-3 flex gap-2">
+            <p className="mt-2 break-words text-sm text-slate-600">解析：{q.explanation}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
               {q.type === "single_choice" && (
                 <button className="btn-ghost" onClick={() => harden(q)}>
                   优化干扰项

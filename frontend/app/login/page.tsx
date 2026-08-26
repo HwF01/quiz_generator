@@ -27,10 +27,25 @@ export default function LoginPage() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-8">
+    <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-6 sm:p-8">
       <h1 className="text-xl font-semibold">登录</h1>
-      <input className="input" placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <input className="input" type="password" placeholder="密码" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <input
+        className="input"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        placeholder="邮箱"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <input
+        className="input"
+        type="password"
+        autoComplete="current-password"
+        placeholder="密码"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
       {err && <p className="text-sm text-red-600">{err}</p>}
       <button className="btn-primary w-full">登录</button>
       <p className="text-sm text-slate-500">

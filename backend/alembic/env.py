@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401
     play_record,
     wrong_question,
     favorite,
+    question_favorite,
     quiz_rating,
 )
 

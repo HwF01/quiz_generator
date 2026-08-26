@@ -10,9 +10,8 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuizFilterTabs } from "@/components/QuizFilterTabs";
 
 type Row = {
-  wrong_count: number;
   favorited: boolean;
-  last_wrong_at: string;
+  created_at: string | null;
   quiz: { id: string; title: string; category: string };
   question: {
     id: string;
@@ -24,13 +23,13 @@ type Row = {
   };
 };
 
-export default function WrongPage() {
+export default function FavoritesPage() {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [quizId, setQuizId] = useState<string | null>(null);
 
   async function load() {
-    const data = await api<Row[]>("/wrong-questions");
+    const data = await api<Row[]>("/question-favorites");
     setRows(data);
   }
 
@@ -42,12 +41,6 @@ export default function WrongPage() {
   const quizzes = useMemo(() => uniqueQuizzes(rows), [rows]);
   const groups = useMemo(() => groupByQuiz(filterByQuiz(rows, quizId)), [rows, quizId]);
 
-  async function removeRow(questionId: string) {
-    if (!window.confirm("确定从错题本删除本题？题库中的原题不会被删除。")) return;
-    await api(`/wrong-questions/${questionId}`, { method: "DELETE" });
-    await load();
-  }
-
   async function toggleFav(questionId: string) {
     await api(`/quizzes/questions/${questionId}/favorite`, { method: "POST" });
     await load();
@@ -55,7 +48,7 @@ export default function WrongPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">错题本</h1>
+      <h1 className="text-2xl font-semibold">收藏</h1>
       <QuizFilterTabs quizzes={quizzes} activeId={quizId} onSelect={setQuizId} />
       {groups.map((g) => (
         <section key={g.quiz.id} className="space-y-3">
@@ -69,9 +62,7 @@ export default function WrongPage() {
           {g.items.map((r) => (
             <article key={r.question.id} className="card p-5">
               <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 text-xs text-slate-500">
-                  错 {r.wrong_count} 次 · {r.question.micro_skill}
-                </p>
+                <p className="min-w-0 text-xs text-slate-500">{r.question.micro_skill}</p>
                 <FavoriteButton favorited={r.favorited} onToggle={() => void toggleFav(r.question.id)} />
               </div>
               <p className="mt-2 break-words font-medium">{r.question.content}</p>
@@ -87,21 +78,14 @@ export default function WrongPage() {
                   className="btn-ghost"
                   href={`/practice/${r.question.quiz_set_id}?q=${encodeURIComponent(r.question.id)}`}
                 >
-                  再练一次
+                  去练习
                 </Link>
-                <button
-                  className="btn-ghost text-red-600"
-                  type="button"
-                  onClick={() => removeRow(r.question.id)}
-                >
-                  删除本题
-                </button>
               </div>
             </article>
           ))}
         </section>
       ))}
-      {rows.length === 0 && <p className="text-sm text-slate-500">还没有错题。</p>}
+      {rows.length === 0 && <p className="text-sm text-slate-500">还没有收藏。做题或审校时可以收藏题目。</p>}
     </div>
   );
 }

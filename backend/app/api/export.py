@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models.question import Question
 from app.models.quiz_set import QuizSet
 from app.models.user import User
+from app.services.distractor_engine import tf_option_label
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -86,7 +87,10 @@ async def export_xlsx(
     ws.title = "questions"
     ws.append(["题干", "类型", "选项", "答案", "解析", "难度", "微技能", "待审校"])
     for q in questions:
-        opts = " | ".join(f"{o.get('key')}. {o.get('text')}" for o in (q.options or []))
+        if q.type == "true_false":
+            opts = " | ".join(tf_option_label(o) for o in (q.options or []))
+        else:
+            opts = " | ".join(f"{o.get('key')}. {o.get('text')}" for o in (q.options or []))
         ws.append(
             [
                 q.content,

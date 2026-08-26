@@ -45,8 +45,8 @@ BUILTIN = [
             {
                 "type": "true_false",
                 "content": "线粒体是植物细胞进行光合作用的主要场所。",
-                "options": [{"key": "true", "text": "正确"}, {"key": "false", "text": "错误"}],
-                "answer": {"keys": ["false"]},
+                "options": [{"key": "对", "text": "对"}, {"key": "错", "text": "错"}],
+                "answer": {"keys": ["错"]},
                 "explanation": "线粒体进行呼吸作用，叶绿体进行光合作用。",
                 "difficulty": "easy",
                 "micro_skill": "inference",

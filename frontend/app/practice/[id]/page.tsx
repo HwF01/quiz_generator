@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
+import { formatOptionLabel } from "@/lib/options";
 import Link from "next/link";
+import { FavoriteButton } from "@/components/FavoriteButton";
 
 type Question = {
   id: string;
@@ -11,9 +13,16 @@ type Question = {
   content: string;
   options: { key: string; text: string }[] | null;
   micro_skill: string;
+  favorited?: boolean;
 };
 
-type Quiz = { id: string; title: string; questions: Question[] };
+type Quiz = {
+  id: string;
+  title: string;
+  creator_id?: string;
+  is_builtin?: boolean;
+  questions: Question[];
+};
 
 type Result = {
   score: number;
@@ -47,6 +56,8 @@ export default function PracticePage() {
   const [rating, setRating] = useState(5);
   const [mode, setMode] = useState<"sequential" | "random">("sequential");
   const [qFilter, setQFilter] = useState<string | null>(null);
+  const [meId, setMeId] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
@@ -54,9 +65,13 @@ export default function PracticePage() {
     const params = new URLSearchParams(search);
     const filter = params.get("q") || params.get("question") || params.get("question_id");
     setQFilter(filter);
-    api<Quiz>(`/quizzes/${id}?purpose=practice`).then((raw) => {
+    Promise.all([
+      api<Quiz>(`/quizzes/${id}?purpose=practice`),
+      api<{ id: string }>("/auth/me").catch(() => null),
+    ]).then(([raw, me]) => {
       const questions = filter ? raw.questions.filter((x) => x.id === filter) : raw.questions;
       originalRef.current = questions;
+      setMeId(me?.id ?? null);
       setQuiz({ ...raw, questions });
       setIdx(0);
     });
@@ -79,6 +94,7 @@ export default function PracticePage() {
 
   const q = quiz?.questions[idx];
   const progress = quiz ? `${idx + 1}/${quiz.questions.length}` : "";
+  const canDelete = Boolean(quiz?.creator_id && meId && quiz.creator_id === meId && !quiz.is_builtin);
 
   function isChecked(qid: string, key: string) {
     const v = answers[qid];
@@ -94,6 +110,43 @@ export default function PracticePage() {
     const arr = Array.isArray(cur) ? cur : [];
     const next = arr.includes(key) ? arr.filter((k) => k !== key) : [...arr, key];
     setAnswers({ ...answers, [qid]: next });
+  }
+
+  async function removeCurrent() {
+    if (!quiz || !q || !canDelete) return;
+    if (!window.confirm("确定从题库删除本题？此操作不可撤销。")) return;
+    const qid = q.id;
+    try {
+      await api(`/quizzes/questions/${qid}`, { method: "DELETE" });
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "删除失败");
+      return;
+    }
+    originalRef.current = originalRef.current.filter((x) => x.id !== qid);
+    const nextQs = quiz.questions.filter((x) => x.id !== qid);
+    setAnswers((prev) => {
+      const copy = { ...prev };
+      delete copy[qid];
+      return copy;
+    });
+    setQuiz({ ...quiz, questions: nextQs });
+    setIdx((i) => (nextQs.length === 0 ? 0 : Math.min(i, nextQs.length - 1)));
+    setMsg("");
+  }
+
+  async function toggleFav() {
+    if (!q) return;
+    const qid = q.id;
+    try {
+      const data = await api<{ favorited: boolean }>(`/quizzes/questions/${qid}/favorite`, {
+        method: "POST",
+      });
+      const patch = (item: Question) => (item.id === qid ? { ...item, favorited: data.favorited } : item);
+      originalRef.current = originalRef.current.map(patch);
+      setQuiz((prev) => (prev ? { ...prev, questions: prev.questions.map(patch) } : prev));
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "收藏失败");
+    }
   }
 
   async function submit() {
@@ -114,10 +167,10 @@ export default function PracticePage() {
   if (!quiz) return <p>加载中…</p>;
   if (!q) {
     return (
-      <div className="card space-y-3 p-6">
-        <p>未找到要重练的题目。</p>
-        <Link className="btn-ghost" href="/wrong">
-          返回错题本
+      <div className="card space-y-3 p-4 sm:p-6">
+        <p>{qFilter ? "未找到要重练的题目。" : "题库中已没有题目。"}</p>
+        <Link className="btn-ghost" href={qFilter ? "/wrong" : `/quizzes/${id}`}>
+          {qFilter ? "返回错题本" : "返回题库"}
         </Link>
       </div>
     );
@@ -125,7 +178,7 @@ export default function PracticePage() {
 
   if (result) {
     return (
-      <div className="card space-y-4 p-6">
+      <div className="card space-y-4 p-4 sm:p-6">
         <h1 className="text-2xl font-semibold">成绩 {result.score} 分</h1>
         <p>
           答对 {result.correct}/{result.total} · 用时 {seconds} 秒
@@ -140,7 +193,7 @@ export default function PracticePage() {
             </li>
           ))}
         </ul>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm">评分</span>
           <select className="input w-24" value={rating} onChange={(e) => setRating(Number(e.target.value))}>
             {[1, 2, 3, 4, 5].map((n) => (
@@ -156,7 +209,7 @@ export default function PracticePage() {
             提交评分
           </button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link className="btn-primary" href="/wrong">
             去错题本
           </Link>
@@ -171,13 +224,16 @@ export default function PracticePage() {
   const multi = q.type === "multi_choice";
 
   return (
-    <div className="card space-y-5 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{quiz.title}</h1>
-        <div className="text-sm text-slate-500">
-          {progress} · {seconds}s
+    <div className="card space-y-5 p-4 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-xl font-semibold">{quiz.title}</h1>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+          <FavoriteButton favorited={Boolean(q.favorited)} onToggle={() => void toggleFav()} />
+          <span className="shrink-0">
+            {progress} · {seconds}s
+          </span>
           <select
-            className="input ml-2 w-28"
+            className="input w-28"
             value={mode}
             onChange={(e) => applyMode(e.target.value as "sequential" | "random")}
           >
@@ -186,8 +242,9 @@ export default function PracticePage() {
           </select>
         </div>
       </div>
-      <p className="text-lg">{q.content}</p>
+      <p className="break-words text-lg">{q.content}</p>
       <p className="text-xs text-slate-400">微技能 {q.micro_skill}</p>
+      {msg && <p className="text-sm text-red-600">{msg}</p>}
       {q.type === "fill_blank" ? (
         <input
           className="input"
@@ -200,25 +257,33 @@ export default function PracticePage() {
           {(q.options || []).map((o) => (
             <label
               key={o.key}
-              className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 ${
+              className={`flex min-h-11 cursor-pointer items-start gap-2 rounded-xl border px-3 py-3 ${
                 isChecked(q.id, o.key) ? "border-brand-600 bg-brand-50" : "border-slate-200"
               }`}
             >
               <input
+                className="mt-1 shrink-0"
                 type={multi ? "checkbox" : "radio"}
                 name={q.id}
                 checked={isChecked(q.id, o.key)}
                 onChange={() => (multi ? toggleMulti(q.id, o.key) : pickSingle(q.id, o.key))}
               />
-              {o.key}. {o.text}
+              <span className="min-w-0 flex-1 break-words">
+                {formatOptionLabel(o, q.type, q.options)}
+              </span>
             </label>
           ))}
         </div>
       )}
-      <div className="flex justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <button className="btn-ghost" disabled={idx === 0} onClick={() => setIdx(idx - 1)}>
           上一题
         </button>
+        {canDelete && (
+          <button className="btn-ghost text-red-600" onClick={() => void removeCurrent()}>
+            删除
+          </button>
+        )}
         {idx < quiz.questions.length - 1 ? (
           <button className="btn-primary" onClick={() => setIdx(idx + 1)}>
             下一题

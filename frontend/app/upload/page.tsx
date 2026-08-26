@@ -59,7 +59,12 @@ export default function UploadPage() {
           category,
           subject,
           visibility,
-          blueprint: { total_questions: total, max_detail_ratio: 0.3, target_grade: "通用" },
+          blueprint: {
+            total_questions: total,
+            max_detail_ratio: 0.3,
+            target_grade: "通用",
+            type_mix: { single_choice: 0.8, true_false: 0.2 },
+          },
           force,
         }),
       });
@@ -73,12 +78,17 @@ export default function UploadPage() {
 
   return (
     <div className="grid gap-6 md:grid-cols-2">
-      <div className="card space-y-4 p-6">
+      <div className="card space-y-4 p-4 sm:p-6">
         <h1 className="text-xl font-semibold">上传文档出题</h1>
         <p className="text-sm text-slate-500">支持 PDF / Word / PPT，最大 20MB。扫描件将尝试 OCR。</p>
-        <input type="file" accept=".pdf,.docx,.pptx,.txt,.md" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        <input
+          type="file"
+          accept=".pdf,.docx,.pptx,.txt,.md"
+          className="w-full max-w-full text-sm"
+          onChange={(e) => setFile(e.target.files?.[0] || null)}
+        />
         <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="题库标题" />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <select className="input" value={subject} onChange={(e) => setSubject(e.target.value)}>
             <option value="auto">自动识别科目</option>
             <option value="exam_civil">考公 / 文科</option>
@@ -111,7 +121,7 @@ export default function UploadPage() {
           {busy ? "提交中…" : "开始生成"}
         </button>
       </div>
-      <div className="card p-6">
+      <div className="card p-4 sm:p-6">
         <h2 className="font-medium">流水线进度</h2>
         {!job && <p className="mt-4 text-sm text-slate-500">提交后将依次展示：解析 → 篇章映射 → 出题 → 干扰项过滤 → 质量门控。</p>}
         {job && (

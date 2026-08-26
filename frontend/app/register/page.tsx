@@ -28,11 +28,33 @@ export default function RegisterPage() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-8">
+    <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-6 sm:p-8">
       <h1 className="text-xl font-semibold">注册</h1>
-      <input className="input" placeholder="昵称" value={nickname} onChange={(e) => setNickname(e.target.value)} />
-      <input className="input" placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <input className="input" type="password" placeholder="密码至少 8 位" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} />
+      <input
+        className="input"
+        autoComplete="nickname"
+        placeholder="昵称"
+        value={nickname}
+        onChange={(e) => setNickname(e.target.value)}
+      />
+      <input
+        className="input"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        placeholder="邮箱"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <input
+        className="input"
+        type="password"
+        autoComplete="new-password"
+        placeholder="密码至少 8 位"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        minLength={8}
+      />
       {err && <p className="text-sm text-red-600">{err}</p>}
       <button className="btn-primary w-full">创建账号</button>
       <p className="text-sm text-slate-500">

@@ -12,6 +12,7 @@ from app.core.redis import get_redis
 from app.db.session import get_db
 from app.models.play_record import PlayRecord
 from app.models.question import Question
+from app.models.question_favorite import QuestionFavorite
 from app.models.quiz_set import QuizSet
 from app.models.user import User
 from app.models.wrong_question import WrongQuestion
@@ -162,18 +163,66 @@ async def wrong_questions(
     rows = await db.execute(
         select(WrongQuestion)
         .where(WrongQuestion.user_id == user.id)
-        .order_by(WrongQuestion.is_starred.desc(), WrongQuestion.last_wrong_at.desc())
+        .order_by(WrongQuestion.last_wrong_at.desc())
     )
+    fav_rows = await db.execute(
+        select(QuestionFavorite.question_id).where(QuestionFavorite.user_id == user.id)
+    )
+    fav_ids = set(fav_rows.scalars().all())
     out = []
     for w in rows.scalars().all():
         q = await db.get(Question, w.question_id)
         if not q:
             continue
+        quiz = await db.get(QuizSet, w.quiz_set_id or q.quiz_set_id)
         out.append(
             {
                 "wrong_count": w.wrong_count,
-                "is_starred": bool(w.is_starred),
+                "favorited": w.question_id in fav_ids,
                 "last_wrong_at": w.last_wrong_at.isoformat() if w.last_wrong_at else None,
+                "quiz": {
+                    "id": quiz.id if quiz else q.quiz_set_id,
+                    "title": quiz.title if quiz else "未知题库",
+                    "category": quiz.category if quiz else "",
+                },
+                "question": {
+                    "id": q.id,
+                    "content": q.content,
+                    "type": q.type,
+                    "options": q.options,
+                    "micro_skill": q.micro_skill,
+                    "quiz_set_id": q.quiz_set_id,
+                },
+            }
+        )
+    return ok(out)
+
+
+@router.get("/question-favorites")
+async def question_favorites(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = await db.execute(
+        select(QuestionFavorite)
+        .where(QuestionFavorite.user_id == user.id)
+        .order_by(QuestionFavorite.created_at.desc())
+    )
+    out = []
+    for fav in rows.scalars().all():
+        q = await db.get(Question, fav.question_id)
+        if not q:
+            continue
+        quiz = await db.get(QuizSet, fav.quiz_set_id or q.quiz_set_id)
+        out.append(
+            {
+                "favorited": True,
+                "created_at": fav.created_at.isoformat() if fav.created_at else None,
+                "quiz": {
+                    "id": quiz.id if quiz else q.quiz_set_id,
+                    "title": quiz.title if quiz else "未知题库",
+                    "category": quiz.category if quiz else "",
+                },
                 "question": {
                     "id": q.id,
                     "content": q.content,

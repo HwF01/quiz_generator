@@ -9,6 +9,21 @@ from app.services.ranker import rank_candidates
 ANSWER_SIM_TH = 0.86
 PAIR_SIM_TH = 0.9
 CONTEXT_SIM_TH = 0.12
+TF_TRUE = {"true", "t", "1", "yes", "正确", "对"}
+TF_FALSE = {"false", "f", "0", "no", "错误", "错"}
+
+
+def is_tf_true(value: object) -> bool:
+    token = str(value or "").strip().lower()
+    if token in TF_FALSE:
+        return False
+    return token in TF_TRUE
+
+
+def tf_option_label(option: dict) -> str:
+    if is_tf_true(option.get("key")) or is_tf_true(option.get("text")):
+        return "对"
+    return "错"
 
 
 def filter_candidates(
@@ -86,17 +101,17 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
     answer = stem_payload.get("correct_text") or ""
     qtype = stem_payload.get("type") or "single_choice"
     if qtype == "true_false":
-        keys = stem_payload.get("answer", {}).get("keys") or ["true"]
-        correct = str(keys[0]).lower() in {"true", "t", "1", "正确"}
+        keys = stem_payload.get("answer", {}).get("keys") or ["对"]
+        correct = is_tf_true(keys[0])
         options = [
-            {"key": "true", "text": "正确"},
-            {"key": "false", "text": "错误"},
+            {"key": "对", "text": "对"},
+            {"key": "错", "text": "错"},
         ]
         return _pack(
             stem_payload,
             options,
-            {"keys": ["true" if correct else "false"]},
-            {"false" if correct else "true": "与材料陈述相反或偷换条件"},
+            {"keys": ["对" if correct else "错"]},
+            {"错" if correct else "对": "与材料陈述相反或偷换条件"},
             chunk_id,
         )
     if qtype == "fill_blank":

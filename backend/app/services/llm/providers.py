@@ -213,8 +213,8 @@ def _mock_json(blob: str) -> dict:
         }
         if qtype == "true_false":
             payload["stem"] = f"材料表明：{quote}。"
-            payload["answer"] = {"keys": ["true"], "texts": ["true"]}
-            payload["correct_text"] = "true"
+            payload["answer"] = {"keys": ["对"], "texts": ["对"]}
+            payload["correct_text"] = "对"
         if qtype == "fill_blank":
             payload["stem"] = quote.replace(answer, "______") if answer in quote else "材料中的关键结论是______。"
             payload["answer"] = {"keys": [], "texts": [answer]}

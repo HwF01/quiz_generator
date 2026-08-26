@@ -43,6 +43,26 @@ async def lifespan(_app: FastAPI):
                     )
 
             await conn.run_sync(_ensure_wrong_starred)
+
+            def _migrate_starred_to_favorites(sync_conn):
+                from sqlalchemy import inspect
+
+                insp = inspect(sync_conn)
+                if not insp.has_table("wrong_questions") or not insp.has_table("question_favorites"):
+                    return
+                cols = {c["name"] for c in insp.get_columns("wrong_questions")}
+                if "is_starred" not in cols:
+                    return
+                sync_conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO question_favorites "
+                        "(user_id, question_id, quiz_set_id, created_at) "
+                        "SELECT user_id, question_id, quiz_set_id, CURRENT_TIMESTAMP "
+                        "FROM wrong_questions WHERE is_starred = 1"
+                    )
+                )
+
+            await conn.run_sync(_migrate_starred_to_favorites)
         await seed()
     try:
         ensure_bucket()

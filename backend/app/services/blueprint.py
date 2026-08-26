@@ -11,12 +11,14 @@ SKILL_DIFFICULTY = {
     "attitude": "medium",
 }
 
-TYPES = ["single_choice", "true_false", "fill_blank"]
+TYPES = ["single_choice", "true_false"]
 SKILLS_CYCLE = ["gist", "inference", "theme", "detail", "attitude", "cohesion"]
 
 
 def allocate(n_items: int, blueprint: QuizBlueprint) -> list[dict]:
-    n = min(n_items, blueprint.total_questions)
+    if n_items <= 0:
+        return []
+    n = blueprint.total_questions
     type_seq = _weighted_seq(blueprint.type_mix, n, TYPES, "single_choice")
     skills = []
     detail_budget = int(n * blueprint.max_detail_ratio)
@@ -70,7 +72,13 @@ def enforce_detail_cap(questions: list[dict], max_ratio: float) -> list[dict]:
     others = [q for q in questions if q.get("micro_skill") != "detail"]
     if len(details) <= cap:
         return questions
-    kept_details = sorted(
+    ranked = sorted(
         details, key=lambda q: (q.get("quality_scores") or {}).get("usability", 0), reverse=True
-    )[:cap]
-    return others + kept_details
+    )
+    kept_details = ranked[:cap]
+    overflow = ranked[cap:]
+    for q in overflow:
+        q["micro_skill"] = "inference"
+        q["difficulty"] = SKILL_DIFFICULTY["inference"]
+        q["cognitive_level"] = "understand"
+    return others + kept_details + overflow
