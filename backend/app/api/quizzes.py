@@ -1,8 +1,8 @@
-import asyncio
+import logging
 from typing import Literal
 
 from arq import create_pool
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,8 +24,21 @@ from app.schemas.quiz import GenerateQuizIn, QuestionUpdateIn, QuizUpdateIn, Rat
 from app.services.distractor_engine import build_choice_question
 from app.services.quality_gates import apply_gates
 from app.services.quota import assert_quota, incr_quota
+from app.services.quiz_title import uniquify_title
 
+logger = logging.getLogger("quizgen")
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
+
+
+async def _run_generation_job(job_id: str) -> None:
+    from app.db.session import SessionLocal
+    from app.services.pipeline import run_generation
+
+    try:
+        async with SessionLocal() as session:
+            await run_generation(session, job_id)
+    except Exception:
+        logger.exception("generation job failed job_id=%s", job_id)
 
 
 def _q_out(q: Question) -> dict:
@@ -85,6 +98,7 @@ def _quiz_out(quiz: QuizSet, extra: dict | None = None) -> dict:
 @router.post("/generate")
 async def generate(
     body: GenerateQuizIn,
+    background: BackgroundTasks,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -92,12 +106,25 @@ async def generate(
     doc = await db.get(Document, body.document_id)
     if not doc or doc.owner_id != user.id:
         raise AppError("文档不存在", code=404, status_code=404)
+    existing_titles = list(
+        (
+            await db.execute(
+                select(QuizSet.title).where(
+                    QuizSet.creator_id == user.id,
+                    QuizSet.status != "failed",
+                )
+            )
+        ).scalars().all()
+    )
+    resolved_title = uniquify_title(body.title, existing_titles)
+    job_config = body.model_dump()
+    job_config["title"] = resolved_title
     job = GenerationJob(
         user_id=user.id,
         document_id=doc.id,
         status="queued",
         stage="queued",
-        config=body.model_dump(),
+        config=job_config,
     )
     db.add(job)
     await db.flush()
@@ -105,7 +132,7 @@ async def generate(
         creator_id=user.id,
         document_id=doc.id,
         generation_job_id=job.id,
-        title=body.title,
+        title=resolved_title,
         category=body.category,
         subject=body.subject if body.subject != "auto" else "general",
         visibility=body.visibility,
@@ -117,21 +144,14 @@ async def generate(
     await db.flush()
     job.quiz_set_id = quiz.id
     await db.commit()
-
-    async def _run() -> None:
-        from app.db.session import SessionLocal
-        from app.services.pipeline import run_generation
-
-        async with SessionLocal() as session:
-            await run_generation(session, job.id)
+    job_id = job.id
+    quiz_id = quiz.id
 
     local_fallback = settings.is_local_stack
-    if local_fallback:
-        asyncio.create_task(_run())
-    else:
+    if not local_fallback:
         try:
             pool = await create_pool(redis_settings())
-            await pool.enqueue_job("generate_quiz_job", job.id)
+            await pool.enqueue_job("generate_quiz_job", job_id)
             await pool.aclose()
         except Exception as exc:
             job.status = "failed"
@@ -140,7 +160,9 @@ async def generate(
             await db.commit()
             raise AppError("任务队列暂不可用，请稍后重试", code=503, status_code=503) from exc
     await incr_quota(user.id, user.daily_gen_quota)
-    return ok({"job_id": job.id, "quiz_id": quiz.id})
+    if local_fallback:
+        background.add_task(_run_generation_job, job_id)
+    return ok({"job_id": job_id, "quiz_id": quiz_id})
 
 
 @router.get("/favorites")
@@ -168,11 +190,6 @@ async def my_quizzes(
         .order_by(QuizSet.created_at.desc())
     )
     quizzes = list(rows.scalars().all())
-    failed = [q for q in quizzes if q.status == "failed"]
-    if failed:
-        for q in failed:
-            await _discard_quiz(db, q)
-        await db.commit()
     visible = [q for q in quizzes if q.status != "failed"]
     return ok([_quiz_out(q) for q in visible])
 
@@ -398,7 +415,7 @@ async def rate_quiz(
     db: AsyncSession = Depends(get_db),
 ):
     quiz = await db.get(QuizSet, quiz_id)
-    assert_quiz_accessible(quiz, user)
+    quiz = assert_quiz_accessible(quiz, user)
     existing = await db.get(QuizRating, (user.id, quiz_id))
     if existing:
         existing.score = body.score
@@ -409,8 +426,12 @@ async def rate_quiz(
                 user_id=user.id, quiz_set_id=quiz_id, score=body.score, comment=body.comment
             )
         )
+    shared_to_plaza = bool(quiz.is_builtin or quiz.is_public or quiz.visibility == "public")
+    if not quiz.is_builtin and (quiz.visibility == "public" or quiz.is_public):
+        quiz.visibility = "public"
+        quiz.is_public = True
     await db.commit()
     avg = await db.scalar(
         select(func.avg(QuizRating.score)).where(QuizRating.quiz_set_id == quiz_id)
     )
-    return ok({"avg": float(avg or 0), "my_score": body.score})
+    return ok({"avg": float(avg or 0), "my_score": body.score, "shared_to_plaza": shared_to_plaza})

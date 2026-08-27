@@ -5,7 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
 import { formatOptionLabel } from "@/lib/options";
 import Link from "next/link";
+import { Star } from "lucide-react";
 import { FavoriteButton } from "@/components/FavoriteButton";
+import { PlayDetailCards, type PlayDetail } from "@/components/PlayDetailDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type Question = {
   id: string;
@@ -21,10 +24,13 @@ type Quiz = {
   title: string;
   creator_id?: string;
   is_builtin?: boolean;
+  visibility?: string;
+  is_public?: boolean;
   questions: Question[];
 };
 
 type Result = {
+  record_id?: string;
   score: number;
   correct: number;
   total: number;
@@ -53,11 +59,16 @@ export default function PracticePage() {
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [seconds, setSeconds] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
-  const [rating, setRating] = useState(5);
+  const [playDetail, setPlayDetail] = useState<PlayDetail | null>(null);
+  const [rating, setRating] = useState(0);
+  const [rateBusy, setRateBusy] = useState(false);
+  const [rateMsg, setRateMsg] = useState("");
   const [mode, setMode] = useState<"sequential" | "random">("sequential");
   const [qFilter, setQFilter] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const [pendingDelete, setPendingDelete] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
@@ -112,14 +123,21 @@ export default function PracticePage() {
     setAnswers({ ...answers, [qid]: next });
   }
 
-  async function removeCurrent() {
+  function requestRemoveCurrent() {
     if (!quiz || !q || !canDelete) return;
-    if (!window.confirm("确定从题库删除本题？此操作不可撤销。")) return;
+    setPendingDelete(true);
+  }
+
+  async function confirmRemoveCurrent() {
+    if (!quiz || !q || !canDelete) return;
     const qid = q.id;
+    setDeleteBusy(true);
     try {
       await api(`/quizzes/questions/${qid}`, { method: "DELETE" });
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "删除失败");
+      setDeleteBusy(false);
+      setPendingDelete(false);
       return;
     }
     originalRef.current = originalRef.current.filter((x) => x.id !== qid);
@@ -132,6 +150,8 @@ export default function PracticePage() {
     setQuiz({ ...quiz, questions: nextQs });
     setIdx((i) => (nextQs.length === 0 ? 0 : Math.min(i, nextQs.length - 1)));
     setMsg("");
+    setPendingDelete(false);
+    setDeleteBusy(false);
   }
 
   async function toggleFav() {
@@ -162,6 +182,32 @@ export default function PracticePage() {
       }),
     });
     setResult(data);
+    if (data.record_id) {
+      try {
+        const detail = await api<PlayDetail>(`/plays/${data.record_id}`);
+        setPlayDetail(detail);
+      } catch (e) {
+        setMsg(e instanceof Error ? e.message : "加载作答详情失败");
+      }
+    }
+  }
+
+  async function submitRating(score: number) {
+    if (!quiz || qFilter || rateBusy) return;
+    setRating(score);
+    setRateBusy(true);
+    setRateMsg("");
+    try {
+      const data = await api<{ avg: number; my_score: number; shared_to_plaza?: boolean }>(
+        `/quizzes/${id}/rate`,
+        { method: "POST", body: JSON.stringify({ score }) },
+      );
+      setRateMsg(data.shared_to_plaza ? "评分已同步到社区广场" : "已评分");
+    } catch (e) {
+      setRateMsg(e instanceof Error ? e.message : "评分失败");
+    } finally {
+      setRateBusy(false);
+    }
   }
 
   if (!quiz) return <p>加载中…</p>;
@@ -177,38 +223,60 @@ export default function PracticePage() {
   }
 
   if (result) {
+    const score = playDetail?.score ?? result.score;
+    const correct = playDetail?.correct ?? result.correct;
+    const total = playDetail?.total ?? result.total;
     return (
-      <div className="card space-y-4 p-4 sm:p-6">
-        <h1 className="text-2xl font-semibold">成绩 {result.score} 分</h1>
-        <p>
-          答对 {result.correct}/{result.total} · 用时 {seconds} 秒
-        </p>
-        {result.weak_skills.length > 0 && (
-          <p className="text-sm text-amber-700">薄弱微技能：{result.weak_skills.join("、")}</p>
-        )}
-        <ul className="space-y-2 text-sm">
-          {result.details.map((d, i) => (
-            <li key={d.question_id} className={d.correct ? "text-green-700" : "text-red-700"}>
-              第 {i + 1} 题 {d.correct ? "正确" : "错误"} {d.explanation ? `· ${d.explanation}` : ""}
-            </li>
-          ))}
-        </ul>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm">评分</span>
-          <select className="input w-24" value={rating} onChange={(e) => setRating(Number(e.target.value))}>
-            {[1, 2, 3, 4, 5].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn-ghost"
-            onClick={() => api(`/quizzes/${id}/rate`, { method: "POST", body: JSON.stringify({ score: rating }) })}
-          >
-            提交评分
-          </button>
+      <div className="space-y-4">
+        <div className="card space-y-3 p-4 sm:p-6">
+          <h1 className="text-2xl font-semibold break-words">{quiz.title}</h1>
+          <p className="text-sm text-slate-500">
+            {score} 分 · 答对 {correct}/{total} · 用时 {seconds} 秒
+          </p>
+          {result.weak_skills.length > 0 && (
+            <p className="text-sm text-amber-700">薄弱微技能：{result.weak_skills.join("、")}</p>
+          )}
+          {msg && <p className="text-sm text-red-600">{msg}</p>}
         </div>
+        {playDetail ? (
+          <PlayDetailCards details={playDetail.details} />
+        ) : (
+          <ul className="card space-y-2 p-4 text-sm sm:p-6">
+            {result.details.map((d, i) => (
+              <li key={d.question_id} className={d.correct ? "text-green-700" : "text-red-700"}>
+                第 {i + 1} 题 {d.correct ? "正确" : "错误"} {d.explanation ? `· ${d.explanation}` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+        {!qFilter && (
+          <div className="card space-y-3 p-4 sm:p-6">
+            <p className="text-sm font-medium">给这个题库打分吧！</p>
+            <div className="flex flex-wrap items-center gap-1">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg transition hover:bg-amber-50 disabled:opacity-60"
+                  aria-label={`${n} 星`}
+                  aria-pressed={rating >= n}
+                  disabled={rateBusy}
+                  onClick={() => void submitRating(n)}
+                >
+                  <Star
+                    className={`h-7 w-7 ${
+                      rating >= n ? "fill-amber-400 text-amber-400" : "fill-none text-slate-300"
+                    }`}
+                    strokeWidth={1.75}
+                  />
+                </button>
+              ))}
+            </div>
+            {rateMsg && (
+              <p className={`text-sm ${rateMsg.includes("失败") ? "text-red-600" : "text-emerald-700"}`}>{rateMsg}</p>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           <Link className="btn-primary" href="/wrong">
             去错题本
@@ -224,6 +292,7 @@ export default function PracticePage() {
   const multi = q.type === "multi_choice";
 
   return (
+    <>
     <div className="card space-y-5 p-4 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="min-w-0 break-words text-xl font-semibold">{quiz.title}</h1>
@@ -280,7 +349,7 @@ export default function PracticePage() {
           上一题
         </button>
         {canDelete && (
-          <button className="btn-ghost text-red-600" onClick={() => void removeCurrent()}>
+          <button className="btn-ghost text-red-600" onClick={requestRemoveCurrent}>
             删除
           </button>
         )}
@@ -295,5 +364,15 @@ export default function PracticePage() {
         )}
       </div>
     </div>
+    <ConfirmDialog
+      open={pendingDelete}
+      title="从题库删除"
+      description="确定从题库删除本题？此操作不可撤销。"
+      confirmLabel="删除"
+      busy={deleteBusy}
+      onCancel={() => !deleteBusy && setPendingDelete(false)}
+      onConfirm={() => void confirmRemoveCurrent()}
+    />
+    </>
   );
 }

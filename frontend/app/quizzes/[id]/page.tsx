@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api, downloadAuth, getToken } from "@/lib/api";
 import { formatOptionLabel } from "@/lib/options";
 import { FavoriteButton } from "@/components/FavoriteButton";
+import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
 
 type Question = {
   id: string;
@@ -38,9 +39,11 @@ type Quiz = {
 
 export default function QuizEditPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [msg, setMsg] = useState("");
+  const [editing, setEditing] = useState<Question | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState("");
 
   async function load() {
     const data = await api<Quiz>(`/quizzes/${id}?purpose=review`);
@@ -66,11 +69,28 @@ export default function QuizEditPage() {
     load();
   }
 
-  async function harden(q: Question) {
-    setMsg("正在优化干扰项…");
-    await api(`/quizzes/questions/${q.id}/harden`, { method: "POST" });
-    setMsg("已更新干扰项");
-    load();
+  function openEdit(q: Question) {
+    setEditError("");
+    setEditing(q);
+  }
+
+  async function saveEdit(patch: QuestionPatch) {
+    if (!editing) return;
+    setSaving(true);
+    setEditError("");
+    try {
+      await api(`/quizzes/questions/${editing.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      setEditing(null);
+      setMsg("已保存修改");
+      await load();
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function toggleFav(q: Question) {
@@ -147,11 +167,7 @@ export default function QuizEditPage() {
                 onToggle={() => void toggleFav(q)}
               />
             </div>
-            <textarea
-              className="input min-h-[72px]"
-              defaultValue={q.content}
-              onBlur={(e) => e.target.value !== q.content && saveQuestion(q, { content: e.target.value })}
-            />
+            <p className="whitespace-pre-wrap break-words text-sm leading-6">{q.content}</p>
             {q.options && (
               <ul className="mt-3 space-y-1 text-sm">
                 {q.options.map((o) => (
@@ -172,16 +188,17 @@ export default function QuizEditPage() {
                 ))}
               </ul>
             )}
+            {q.type === "fill_blank" && q.answer?.texts && q.answer.texts.length > 0 && (
+              <p className="mt-3 text-sm text-green-700">正解：{q.answer.texts.join(" / ")}</p>
+            )}
             {q.source_span?.quote && (
               <p className="mt-3 break-words rounded-lg bg-slate-50 p-2 text-xs text-slate-600">原文：{q.source_span.quote}</p>
             )}
             <p className="mt-2 break-words text-sm text-slate-600">解析：{q.explanation}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {q.type === "single_choice" && (
-                <button className="btn-ghost" onClick={() => harden(q)}>
-                  优化干扰项
-                </button>
-              )}
+              <button className="btn-ghost" onClick={() => openEdit(q)}>
+                手动修改
+              </button>
               <button className="btn-ghost" onClick={() => saveQuestion(q, { needs_review: !q.needs_review })}>
                 {q.needs_review ? "标记已审" : "标记待审"}
               </button>
@@ -198,6 +215,17 @@ export default function QuizEditPage() {
           </article>
         ))}
       </div>
+      {editing && (
+        <QuestionEditDialog
+          question={editing}
+          busy={saving}
+          error={editError}
+          onClose={() => {
+            if (!saving) setEditing(null);
+          }}
+          onSave={(patch) => void saveEdit(patch)}
+        />
+      )}
     </div>
   );
 }

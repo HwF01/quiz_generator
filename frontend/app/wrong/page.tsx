@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuizFilterTabs } from "@/components/QuizFilterTabs";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type Row = {
   wrong_count: number;
@@ -28,6 +29,8 @@ export default function WrongPage() {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [quizId, setQuizId] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function load() {
     const data = await api<Row[]>("/wrong-questions");
@@ -42,10 +45,20 @@ export default function WrongPage() {
   const quizzes = useMemo(() => uniqueQuizzes(rows), [rows]);
   const groups = useMemo(() => groupByQuiz(filterByQuiz(rows, quizId)), [rows, quizId]);
 
-  async function removeRow(questionId: string) {
-    if (!window.confirm("确定从错题本删除本题？题库中的原题不会被删除。")) return;
-    await api(`/wrong-questions/${questionId}`, { method: "DELETE" });
-    await load();
+  function requestRemove(questionId: string) {
+    setPendingId(questionId);
+  }
+
+  async function confirmRemove() {
+    if (!pendingId) return;
+    setDeleteBusy(true);
+    try {
+      await api(`/wrong-questions/${pendingId}`, { method: "DELETE" });
+      setPendingId(null);
+      await load();
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   async function toggleFav(questionId: string) {
@@ -92,7 +105,7 @@ export default function WrongPage() {
                 <button
                   className="btn-ghost text-red-600"
                   type="button"
-                  onClick={() => removeRow(r.question.id)}
+                  onClick={() => requestRemove(r.question.id)}
                 >
                   删除本题
                 </button>
@@ -102,6 +115,15 @@ export default function WrongPage() {
         </section>
       ))}
       {rows.length === 0 && <p className="text-sm text-slate-500">还没有错题。</p>}
+      <ConfirmDialog
+        open={pendingId !== null}
+        title="从错题本删除"
+        description="确定从错题本删除本题？题库中的原题不会被删除。"
+        confirmLabel="删除"
+        busy={deleteBusy}
+        onCancel={() => !deleteBusy && setPendingId(null)}
+        onConfirm={() => void confirmRemove()}
+      />
     </div>
   );
 }

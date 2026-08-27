@@ -41,5 +41,5 @@ Start-Process powershell -WorkingDirectory $Backend -ArgumentList @(
 Start-Process powershell -WorkingDirectory $Frontend -ArgumentList @(
     "-NoExit",
     "-Command",
-    "npm run dev"
+    "`$env:INTERNAL_API_URL='http://127.0.0.1:8000'; npm run dev"
 )

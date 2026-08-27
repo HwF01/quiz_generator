@@ -42,7 +42,12 @@ async def upload(
     if ALLOWED[ctype] != ext:
         raise AppError("文件扩展名与类型不一致")
     key = f"{user.id}/{uuid4()}{ext}"
-    await asyncio.to_thread(upload_bytes, key, data, ctype)
+    try:
+        await asyncio.to_thread(upload_bytes, key, data, ctype)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError("文件保存失败，请稍后重试", code=503, status_code=503) from exc
     doc = Document(
         owner_id=user.id,
         filename=name,
@@ -51,7 +56,12 @@ async def upload(
         size_bytes=len(data),
         status="uploaded",
     )
-    db.add(doc)
-    await db.commit()
-    await db.refresh(doc)
+    try:
+        db.add(doc)
+        await db.commit()
+        await db.refresh(doc)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError("保存文档失败，请稍后重试", code=500, status_code=500) from exc
     return ok({"id": doc.id, "filename": doc.filename, "size_bytes": doc.size_bytes})

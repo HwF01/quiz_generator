@@ -1,5 +1,9 @@
+import logging
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger("quizgen")
 
 
 class AppError(Exception):
@@ -14,6 +18,14 @@ async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={"code": exc.code, "data": None, "message": exc.message},
+    )
+
+
+async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("unhandled error: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"code": 500, "data": None, "message": "服务器繁忙，请稍后重试"},
     )
 
 

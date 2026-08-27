@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, getToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import { PlayDetailDialog, type PlayDetail } from "@/components/PlayDetailDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type Quiz = {
   id: string;
@@ -14,7 +16,47 @@ type Quiz = {
   category: string;
 };
 
-type Play = { id: string; quiz_id: string; title: string; score: number; created_at: string };
+type Play = {
+  id: string;
+  quiz_id: string;
+  title: string;
+  score: number;
+  time_spent?: number;
+  mode?: string;
+  created_at: string | null;
+};
+
+function scoreTone(score: number): string {
+  if (score >= 80) return "bg-emerald-50 text-emerald-700";
+  if (score >= 60) return "bg-amber-50 text-amber-800";
+  return "bg-rose-50 text-rose-700";
+}
+
+function formatWhen(iso: string | null): string {
+  if (!iso) return "时间未知";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(seconds?: number): string {
+  const total = Math.max(0, Math.round(seconds ?? 0));
+  if (total < 60) return `${total} 秒`;
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest ? `${minutes} 分 ${rest} 秒` : `${minutes} 分钟`;
+}
+
+function modeLabel(mode?: string): string {
+  if (mode === "random") return "随机";
+  if (mode === "wrong_retry") return "错题重练";
+  return "顺序";
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -22,6 +64,10 @@ export default function ProfilePage() {
   const [favs, setFavs] = useState<Quiz[]>([]);
   const [plays, setPlays] = useState<Play[]>([]);
   const [me, setMe] = useState<{ nickname: string; email: string; quota?: { remaining: number; limit: number } } | null>(null);
+  const [detail, setDetail] = useState<PlayDetail | null>(null);
+  const [detailError, setDetailError] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getToken()) {
@@ -33,6 +79,39 @@ export default function ProfilePage() {
     api<Quiz[]>("/quizzes/favorites").then(setFavs).catch(() => setFavs([]));
     api<Play[]>("/plays").then(setPlays).catch(() => setPlays([]));
   }, [router]);
+
+  async function openDetail(playId: string) {
+    setDetailError("");
+    setBusyId(playId);
+    try {
+      const data = await api<PlayDetail>(`/plays/${playId}`);
+      setDetail(data);
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : "加载详情失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function requestRemovePlay(playId: string) {
+    setPendingPlayId(playId);
+  }
+
+  async function confirmRemovePlay() {
+    if (!pendingPlayId) return;
+    setDetailError("");
+    setBusyId(pendingPlayId);
+    try {
+      await api(`/plays/${pendingPlayId}`, { method: "DELETE" });
+      setPlays((prev) => prev.filter((p) => p.id !== pendingPlayId));
+      setDetail((prev) => (prev?.id === pendingPlayId ? null : prev));
+      setPendingPlayId(null);
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -75,16 +154,64 @@ export default function ProfilePage() {
         </div>
       </section>
       <section>
-        <h2 className="mb-3 font-medium">刷题记录</h2>
-        <ul className="space-y-2 text-sm">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="font-medium">刷题记录</h2>
+          {plays.length > 0 && <span className="text-xs text-slate-400">{plays.length} 次</span>}
+        </div>
+        {detailError && <p className="mb-3 text-sm text-red-600">{detailError}</p>}
+        <div className="space-y-3">
           {plays.map((p) => (
-            <li key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2">
-              <span className="min-w-0 truncate">{p.title}</span>
-              <span className="shrink-0">{p.score} 分</span>
-            </li>
+            <article key={p.id} className="card p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-medium break-words">{p.title || "未知题库"}</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {formatWhen(p.created_at)} · 用时 {formatDuration(p.time_spent)} · {modeLabel(p.mode)}
+                  </p>
+                </div>
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-sm font-semibold ${scoreTone(p.score)}`}>
+                  {p.score} 分
+                </span>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-brand-500"
+                  style={{ width: `${Math.max(0, Math.min(100, p.score))}%` }}
+                />
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={busyId === p.id}
+                  onClick={() => void openDetail(p.id)}
+                >
+                  {busyId === p.id ? "加载中…" : "详情"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-red-600"
+                  disabled={busyId === p.id}
+                  onClick={() => requestRemovePlay(p.id)}
+                >
+                  删除
+                </button>
+              </div>
+            </article>
           ))}
-        </ul>
+          {plays.length === 0 && <p className="text-sm text-slate-500">还没有刷题记录，去题库或广场练一套吧。</p>}
+        </div>
       </section>
+      {detail && <PlayDetailDialog detail={detail} onClose={() => setDetail(null)} />}
+      <ConfirmDialog
+        open={pendingPlayId !== null}
+        title="删除刷题记录"
+        description="确定删除这条刷题记录？此操作不可撤销。"
+        confirmLabel="删除"
+        busy={busyId === pendingPlayId}
+        onCancel={() => !busyId && setPendingPlayId(null)}
+        onConfirm={() => void confirmRemovePlay()}
+      />
     </div>
   );
 }

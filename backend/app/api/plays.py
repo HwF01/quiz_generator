@@ -33,6 +33,64 @@ def _is_correct(question: Question, user_answer) -> bool:
     return str(user_answer) in keys
 
 
+async def _play_question_details(db: AsyncSession, rec: PlayRecord) -> list[dict]:
+    answer_map = rec.answers if isinstance(rec.answers, dict) else {}
+    rows = await db.execute(select(Question).where(Question.quiz_set_id == rec.quiz_set_id))
+    questions = list(rows.scalars().all())
+    by_id = {q.id: q for q in questions}
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    if rec.mode == "wrong_retry":
+        for qid in answer_map:
+            if qid not in seen:
+                ordered_ids.append(str(qid))
+                seen.add(str(qid))
+    else:
+        for q in questions:
+            ordered_ids.append(q.id)
+            seen.add(q.id)
+        for qid in answer_map:
+            sid = str(qid)
+            if sid not in seen:
+                ordered_ids.append(sid)
+                seen.add(sid)
+    details: list[dict] = []
+    for qid in ordered_ids:
+        q = by_id.get(qid)
+        ua = answer_map.get(qid)
+        if q is None:
+            details.append(
+                {
+                    "question_id": qid,
+                    "missing": True,
+                    "content": "该题目已不存在",
+                    "type": None,
+                    "options": None,
+                    "user_answer": ua,
+                    "answer": None,
+                    "correct": False,
+                    "explanation": None,
+                    "micro_skill": None,
+                }
+            )
+            continue
+        details.append(
+            {
+                "question_id": q.id,
+                "missing": False,
+                "content": q.content,
+                "type": q.type,
+                "options": q.options,
+                "user_answer": ua,
+                "answer": q.answer,
+                "correct": _is_correct(q, ua),
+                "explanation": q.explanation,
+                "micro_skill": q.micro_skill,
+            }
+        )
+    return details
+
+
 @router.post("/plays/{quiz_id}")
 async def submit_play(
     quiz_id: str,
@@ -149,10 +207,53 @@ async def my_plays(
                 "title": quiz.title if quiz else "",
                 "score": r.score,
                 "time_spent": r.time_spent,
+                "mode": r.mode,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
         )
     return ok(items)
+
+
+@router.get("/plays/{play_id}")
+async def play_detail(
+    play_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rec = await db.get(PlayRecord, play_id)
+    if not rec or rec.user_id != user.id:
+        raise AppError("练习记录不存在", code=404, status_code=404)
+    quiz = await db.get(QuizSet, rec.quiz_set_id)
+    details = await _play_question_details(db, rec)
+    correct_n = sum(1 for d in details if d.get("correct"))
+    payload = {
+        "id": rec.id,
+        "quiz_id": rec.quiz_set_id,
+        "title": quiz.title if quiz else "",
+        "score": rec.score,
+        "time_spent": rec.time_spent,
+        "mode": rec.mode,
+        "created_at": rec.created_at.isoformat() if rec.created_at else None,
+        "skill_results": rec.skill_results or {},
+        "correct": correct_n,
+        "total": len(details),
+        "details": details,
+    }
+    return ok(payload)
+
+
+@router.delete("/plays/{play_id}")
+async def delete_play(
+    play_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rec = await db.get(PlayRecord, play_id)
+    if not rec or rec.user_id != user.id:
+        raise AppError("练习记录不存在", code=404, status_code=404)
+    await db.delete(rec)
+    await db.commit()
+    return ok({"deleted": True})
 
 
 @router.get("/wrong-questions")

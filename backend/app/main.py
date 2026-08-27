@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.api import api_router
 from app.core.config import settings
-from app.core.exceptions import AppError, app_error_handler, ok
+from app.core.exceptions import AppError, app_error_handler, ok, unhandled_error_handler
 from app.core.redis import get_redis
 from app.db.base import Base
 from app.db.session import engine
@@ -75,6 +75,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_exception_handler(AppError, app_error_handler)
+app.add_exception_handler(Exception, unhandled_error_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url, "http://localhost:3000", "http://127.0.0.1:3000"],

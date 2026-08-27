@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.memory_redis import MemoryRedis
 from app.db.base import Base
-from app.db.session import get_db
+from app.db.session import apply_sqlite_pragmas, get_db
 from app.main import app
 from app.models import *  # noqa: F401,F403
 
@@ -48,13 +48,14 @@ def fake_redis(monkeypatch) -> FakeRedis:
 @pytest_asyncio.fixture
 async def session_factory(tmp_path):
     db_path = tmp_path / "test.db"
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{db_path}",
+        connect_args={"timeout": 30},
+    )
 
     @event.listens_for(engine.sync_engine, "connect")
     def _fk(dbapi_conn, _rec) -> None:
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+        apply_sqlite_pragmas(dbapi_conn)
 
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with engine.begin() as conn:

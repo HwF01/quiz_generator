@@ -33,3 +33,16 @@ body {
 .badge {
   @apply inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600;
 }
+
+.quiz-filter-tab {
+  @apply inline-flex min-h-8 touch-manipulation items-center rounded-full px-3 py-1 text-sm font-medium text-slate-600;
+  @apply transition-[color,background-color,box-shadow,transform] duration-200 ease-out;
+  @apply hover:bg-slate-100 hover:text-slate-800;
+  @apply active:scale-[0.97];
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40;
+}
+
+.quiz-filter-tab[data-active="true"] {
+  @apply bg-brand-50 text-brand-700 shadow-sm ring-1 ring-inset ring-brand-500/20;
+  @apply hover:bg-brand-50 hover:text-brand-700;
+}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
+import { isUnnamedTitle, nextUnnamedTitle, withDuplicateSuffix } from "@/lib/quiz-title";
 
 type Job = {
   id: string;
@@ -17,7 +18,7 @@ type Job = {
 export default function UploadPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState("未命名题库");
+  const [title, setTitle] = useState("未命名题库1");
   const [subject, setSubject] = useState("auto");
   const [category, setCategory] = useState("自定义");
   const [total, setTotal] = useState(8);
@@ -26,49 +27,99 @@ export default function UploadPage() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [force, setForce] = useState(false);
+  const [dupPrompt, setDupPrompt] = useState<{ requested: string; resolved: string } | null>(null);
+  const titleTouchedRef = useRef(false);
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
   }, [router]);
 
   useEffect(() => {
+    api<{ id: string; title: string }[]>("/quizzes")
+      .then((list) => {
+        const computedDefault = nextUnnamedTitle(list.map((q) => q.title));
+        if (!titleTouchedRef.current) setTitle(computedDefault);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (!job || job.status === "succeeded" || job.status === "failed") return;
     const t = setInterval(async () => {
-      const next = await api<Job>(`/jobs/${job.id}`);
-      setJob(next);
-      if (next.status === "succeeded" && next.quiz_set_id) {
-        router.push(`/quizzes/${next.quiz_set_id}`);
+      try {
+        const next = await api<Job>(`/jobs/${job.id}`);
+        setJob(next);
+        if (next.status === "succeeded" && next.quiz_set_id) {
+          router.push(`/quizzes/${next.quiz_set_id}`);
+        }
+      } catch {
+        /* keep polling through transient proxy/500s */
       }
     }, 1500);
     return () => clearInterval(t);
   }, [job, router]);
+
+  async function submitGenerate(uploadFile: File, finalTitle: string) {
+    const fd = new FormData();
+    fd.append("file", uploadFile);
+    const doc = await api<{ id: string }>("/documents/upload", { method: "POST", body: fd });
+    const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        document_id: doc.id,
+        title: finalTitle,
+        category,
+        subject,
+        visibility,
+        blueprint: {
+          total_questions: total,
+          max_detail_ratio: 0.3,
+          target_grade: "通用",
+          type_mix: { single_choice: 0.8, true_false: 0.2 },
+        },
+        force,
+      }),
+    });
+    setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+  }
 
   async function start() {
     if (!file) return;
     setErr("");
     setBusy(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const doc = await api<{ id: string }>("/documents/upload", { method: "POST", body: fd });
-      const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
-        method: "POST",
-        body: JSON.stringify({
-          document_id: doc.id,
-          title,
-          category,
-          subject,
-          visibility,
-          blueprint: {
-            total_questions: total,
-            max_detail_ratio: 0.3,
-            target_grade: "通用",
-            type_mix: { single_choice: 0.8, true_false: 0.2 },
-          },
-          force,
-        }),
-      });
-      setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+      let existingTitles: string[] = [];
+      try {
+        const list = await api<{ id: string; title: string }[]>("/quizzes");
+        existingTitles = list.map((q) => q.title);
+      } catch {
+        existingTitles = [];
+      }
+      const trimmed = title.trim();
+      let finalTitle = trimmed;
+      if (!titleTouchedRef.current || isUnnamedTitle(trimmed)) {
+        finalTitle = nextUnnamedTitle(existingTitles);
+      } else if (existingTitles.includes(trimmed)) {
+        finalTitle = withDuplicateSuffix(trimmed, existingTitles);
+        setDupPrompt({ requested: trimmed, resolved: finalTitle });
+        return;
+      }
+      await submitGenerate(file, finalTitle);
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "上传失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDuplicate() {
+    if (!dupPrompt || !file) return;
+    const finalTitle = dupPrompt.resolved;
+    setDupPrompt(null);
+    setErr("");
+    setBusy(true);
+    try {
+      await submitGenerate(file, finalTitle);
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "上传失败");
     } finally {
@@ -87,7 +138,15 @@ export default function UploadPage() {
           className="w-full max-w-full text-sm"
           onChange={(e) => setFile(e.target.files?.[0] || null)}
         />
-        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="题库标题" />
+        <input
+          className="input"
+          value={title}
+          onChange={(e) => {
+            titleTouchedRef.current = true;
+            setTitle(e.target.value);
+          }}
+          placeholder="题库标题"
+        />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <select className="input" value={subject} onChange={(e) => setSubject(e.target.value)}>
             <option value="auto">自动识别科目</option>
@@ -141,6 +200,35 @@ export default function UploadPage() {
           </div>
         )}
       </div>
+      {dupPrompt && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 sm:items-center sm:p-4"
+          onClick={() => !busy && setDupPrompt(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dup-title"
+            className="card w-full max-w-md rounded-t-2xl p-5 sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="dup-title" className="text-lg font-semibold">
+              题库名称已存在
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              「{dupPrompt.requested}」已有同名题库。若仍使用该名称，将自动保存为「{dupPrompt.resolved}」。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setDupPrompt(null)}>
+                取消
+              </button>
+              <button type="button" className="btn-primary" disabled={busy} onClick={confirmDuplicate}>
+                继续生成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
