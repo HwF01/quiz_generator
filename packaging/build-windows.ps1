@@ -73,7 +73,21 @@ function Expand-ZipTo($Zip, $Dest) {
         Remove-Item -Recurse -Force $Dest
     }
     New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-    Expand-Archive -Path $Zip -DestinationPath $Dest -Force
+    # Expand-Archive rejects non-.zip names (Python nuget is .nupkg).
+    $Archive = $Zip
+    $TempZip = $null
+    if ([IO.Path]::GetExtension($Zip) -ne ".zip") {
+        $TempZip = Join-Path $env:TEMP ("quizgen-" + [guid]::NewGuid().ToString() + ".zip")
+        Copy-Item $Zip $TempZip
+        $Archive = $TempZip
+    }
+    try {
+        Expand-Archive -Path $Archive -DestinationPath $Dest -Force
+    } finally {
+        if ($TempZip -and (Test-Path $TempZip)) {
+            Remove-Item -Force $TempZip
+        }
+    }
 }
 
 function Copy-Robo($Src, $Dst, $ExtraArgs = @()) {
@@ -260,6 +274,8 @@ if ($IsccCmd) {
     $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 } elseif (Test-Path "$env:ProgramFiles\Inno Setup 6\ISCC.exe") {
     $Iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+} elseif (Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") {
+    $Iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 } else {
     $Iscc = $null
 }
