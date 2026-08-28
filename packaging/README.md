@@ -12,6 +12,8 @@
 - 可选：Inno Setup 6（`ISCC.exe`），用于生成安装程序
 - 可选 OCR：把便携版 Tesseract（含 `tesseract.exe` 与 `tessdata/chi_sim.traineddata`）放到 `packaging/vendor/tesseract/`，再加 `-IncludeOcr`
 
+构建会强制执行 `npm ci`，并校验固定版本 Python、Node 和 `get-pip.py` 的 SHA-256；校验失败请删除提示的缓存文件后重试。`-SkipFrontend` 仅适用于调试到前端复制前的阶段，不能生成可分发的 zip 或安装包。
+
 ## 命令
 
 在仓库根目录或本目录执行：
@@ -34,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build-windows.ps1
 | `packaging/dist/QuizGen-portable.zip` | 免安装压缩包 |
 | `packaging/dist/QuizGen-Setup.exe` | Inno 安装程序（有 ISCC 时） |
 
-用户数据在 `%APPDATA%\QuizGen`（数据库、上传、`config.env`、日志），不在 Program Files。
+程序安装到当前用户的 `%LOCALAPPDATA%\Programs\QuizGen`，不需要管理员权限；用户数据在 `%APPDATA%\QuizGen`（数据库、上传、`config.env`、日志）。升级会保留该配置和数据。
 
 ## 本机试跑启动器（不打包）
 
@@ -46,6 +48,8 @@ python packaging\launcher.py
 ```
 
 首次会弹出设置向导。配置写入 `%APPDATA%\QuizGen\config.env`。
+
+便携版请双击 `QuizGen.cmd`，首次配置会在命令窗口中完成；这避免依赖嵌入式 Python 不包含的图形 `tkinter` 组件。
 
 ## SmartScreen
 

@@ -16,6 +16,7 @@ Source-tree fallback: uses backend/.venv and local Node when runtime/ is absent.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -33,6 +34,7 @@ BACKEND_PORT = "8000"
 FRONTEND_PORT = "3000"
 
 CREATE_NO_WINDOW = 0x08000000
+_LEGACY_INNO_SECRET = re.compile(r"^[0-9a-f]{80}$")
 
 
 def _win_no_window() -> int:
@@ -102,7 +104,9 @@ def write_env(path: Path, values: dict[str, str]) -> None:
         f"DEEPSEEK_BASE_URL={values.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')}",
         f"DEEPSEEK_MODEL={values.get('DEEPSEEK_MODEL', 'deepseek-chat')}",
         f"ANTHROPIC_API_KEY={values.get('ANTHROPIC_API_KEY', '')}",
+        f"ANTHROPIC_MODEL={values.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')}",
         f"OPENAI_API_KEY={values.get('OPENAI_API_KEY', '')}",
+        f"OPENAI_MODEL={values.get('OPENAI_MODEL', 'gpt-4o-mini')}",
         f"EMBEDDING_PROVIDER={values.get('EMBEDDING_PROVIDER', 'local')}",
         f"EMBEDDING_MODEL={values.get('EMBEDDING_MODEL', 'hashed-bigram')}",
         f"DAILY_GEN_QUOTA={values.get('DAILY_GEN_QUOTA', '20')}",
@@ -119,13 +123,48 @@ def write_env(path: Path, values: dict[str, str]) -> None:
 def default_config(existing: dict[str, str] | None = None) -> dict[str, str]:
     values = dict(existing or {})
     values.setdefault("APP_ENV", "desktop")
-    values.setdefault("SECRET_KEY", secrets.token_urlsafe(32))
+    if not values.get("SECRET_KEY") or _LEGACY_INNO_SECRET.fullmatch(values["SECRET_KEY"]):
+        values["SECRET_KEY"] = secrets.token_urlsafe(32)
     values.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./quizgen.db")
     values.setdefault("REDIS_URL", "memory://")
     values.setdefault("FRONTEND_URL", FRONTEND_URL)
     values.setdefault("MOCK_LLM", "true")
     values.setdefault("ENABLE_OCR", "false")
     values.setdefault("SETUP_COMPLETE", "true")
+    return values
+
+
+def run_console_wizard(existing: dict[str, str]) -> dict[str, str] | None:
+    """Configure portable builds when the embedded runtime has no tkinter."""
+    if not sys.stdin or not sys.stdin.isatty():
+        message_box(
+            "无法显示首次设置向导。请通过 QuizGen.cmd 启动，"
+            "或在数据目录创建 config.env 后重试。",
+            error=True,
+        )
+        return None
+
+    values = default_config(existing)
+    print(f"\n{APP_TITLE} — 首次设置")
+    print("1. 演示模式（无需 Key）")
+    print("2. 通义千问 Qwen")
+    print("3. DeepSeek")
+    while True:
+        choice = input("请选择 [1]: ").strip() or "1"
+        if choice in {"1", "2", "3"}:
+            break
+        print("请输入 1、2 或 3。")
+
+    if choice == "1":
+        values["MOCK_LLM"] = "true"
+    else:
+        key = input("API Key: ").strip()
+        if not key:
+            print("API Key 不能为空。")
+            return None
+        values["MOCK_LLM"] = "false"
+        values["QWEN_API_KEY" if choice == "2" else "DEEPSEEK_API_KEY"] = key
+    values["SETUP_COMPLETE"] = "true"
     return values
 
 
@@ -148,13 +187,7 @@ def run_first_run_wizard(existing: dict[str, str]) -> dict[str, str] | None:
         import tkinter as tk
         from tkinter import messagebox, ttk
     except Exception:
-        write_env(config_path(), values)
-        message_box(
-            "已写入演示模式配置。\n"
-            f"如需真实出题，请编辑：\n{config_path()}\n"
-            "填写 QWEN_API_KEY 或 DEEPSEEK_API_KEY，并将 MOCK_LLM 设为 false。"
-        )
-        return values
+        return run_console_wizard(existing)
 
     root = tk.Tk()
     root.title(f"{APP_TITLE} — 首次设置")
@@ -451,12 +484,14 @@ def main() -> int:
     root = install_root()
     cfg = config_path()
     existing = parse_env(cfg)
-    if existing.get("SETUP_COMPLETE", "").lower() != "true" or not existing.get("SECRET_KEY"):
+    if existing.get("SETUP_COMPLETE", "").lower() != "true":
         values = run_first_run_wizard(existing)
         if values is None:
             return 0
         write_env(cfg, values)
-    elif not cfg.exists():
+    elif not existing.get("SECRET_KEY") or _LEGACY_INNO_SECRET.fullmatch(
+        existing["SECRET_KEY"]
+    ):
         write_env(cfg, default_config(existing))
 
     if already_running():
@@ -503,7 +538,14 @@ def main() -> int:
             )
             return 1
         frontend_proc = start_frontend(layout, env, frontend_log)
-        wait_http(FRONTEND_URL, attempts=45)
+        if not wait_http(FRONTEND_URL, attempts=45):
+            cleanup()
+            message_box(
+                "前端启动失败。请查看数据目录 logs/frontend.log。\n"
+                + str(data_dir() / "logs"),
+                error=True,
+            )
+            return 1
         webbrowser.open(FRONTEND_URL)
         run_tray(cleanup)
     except Exception as exc:

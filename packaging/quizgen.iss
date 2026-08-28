@@ -12,7 +12,7 @@ AppId={{A3E91C4B-7D2F-4E18-9B6A-81C4F0D1E2A7}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\QuizGen
+DefaultDirName={localappdata}\Programs\QuizGen
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist
@@ -20,8 +20,7 @@ OutputBaseFilename=QuizGen-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 #if FileExists("quizgen.ico")
@@ -68,16 +67,6 @@ var
   ModePage: TInputOptionWizardPage;
   KeyPage: TInputQueryWizardPage;
 
-function GenerateSecret: String;
-var
-  Seed: String;
-begin
-  Seed := GetDateTimeString('yyyymmddhhnnsszzz', #0, #0) +
-    ExpandConstant('{computername}{username}{app}') +
-    IntToStr(Random(2147483647));
-  Result := GetSHA1OfString(Seed) + GetSHA1OfString(Seed + 'quizgen');
-end;
-
 procedure InitializeWizard;
 begin
   ModePage := CreateInputOptionPage(wpSelectTasks,
@@ -98,13 +87,27 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if PageID = KeyPage.ID then
+  if FileExists(ExpandConstant('{userappdata}\QuizGen\config.env')) then
+    Result := (PageID = ModePage.ID) or (PageID = KeyPage.ID)
+  else if PageID = KeyPage.ID then
     Result := ModePage.SelectedValueIndex = 0;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID = KeyPage.ID) and
+     (ModePage.SelectedValueIndex <> 0) and
+     (Trim(KeyPage.Values[0]) = '') then
+  begin
+    MsgBox('请选择演示模式，或填写 API Key。', mbError, MB_OK);
+    Result := False;
+  end;
 end;
 
 procedure WriteUserConfig;
 var
-  ConfigDir, ConfigFile, Secret, Key, Mock, Qwen, Deepseek, Ocr: String;
+  ConfigDir, ConfigFile, Key, Mock, Qwen, Deepseek, Ocr: String;
   Lines: TArrayOfString;
 begin
   ConfigDir := ExpandConstant('{userappdata}\QuizGen');
@@ -113,7 +116,6 @@ begin
   if FileExists(ConfigFile) then
     Exit;
 
-  Secret := GenerateSecret;
   Key := Trim(KeyPage.Values[0]);
   Mock := 'true';
   Qwen := '';
@@ -135,11 +137,11 @@ begin
     Ocr := 'true';
 #endif
 
-  SetArrayLength(Lines, 24);
+  SetArrayLength(Lines, 28);
   Lines[0] := '# 智能题库生成器 — 本机配置（不要分享含有 API Key 的文件）';
   Lines[1] := 'APP_NAME=智能题库生成器';
   Lines[2] := 'APP_ENV=desktop';
-  Lines[3] := 'SECRET_KEY=' + Secret;
+  Lines[3] := 'SECRET_KEY=';
   Lines[4] := 'DATABASE_URL=sqlite+aiosqlite:///./quizgen.db';
   Lines[5] := 'REDIS_URL=memory://';
   Lines[6] := 'FRONTEND_URL=http://127.0.0.1:3000';
@@ -152,14 +154,18 @@ begin
   Lines[13] := 'DEEPSEEK_BASE_URL=https://api.deepseek.com';
   Lines[14] := 'DEEPSEEK_MODEL=deepseek-chat';
   Lines[15] := 'ANTHROPIC_API_KEY=';
-  Lines[16] := 'OPENAI_API_KEY=';
-  Lines[17] := 'EMBEDDING_PROVIDER=local';
-  Lines[18] := 'EMBEDDING_MODEL=hashed-bigram';
-  Lines[19] := 'DAILY_GEN_QUOTA=20';
-  Lines[20] := 'ACCESS_TOKEN_EXPIRE_MINUTES=10080';
-  Lines[21] := 'MAX_UPLOAD_MB=20';
-  Lines[22] := 'SETUP_COMPLETE=true';
-  Lines[23] := '';
+  Lines[16] := 'ANTHROPIC_MODEL=claude-sonnet-4-5';
+  Lines[17] := 'OPENAI_API_KEY=';
+  Lines[18] := 'OPENAI_MODEL=gpt-4o-mini';
+  Lines[19] := 'EMBEDDING_PROVIDER=local';
+  Lines[20] := 'EMBEDDING_MODEL=hashed-bigram';
+  Lines[21] := 'DAILY_GEN_QUOTA=20';
+  Lines[22] := 'ACCESS_TOKEN_EXPIRE_MINUTES=10080';
+  Lines[23] := 'MAX_UPLOAD_MB=20';
+  Lines[24] := 'MAX_KEY_SENTENCES=30';
+  Lines[25] := 'MAX_QUESTIONS=40';
+  Lines[26] := 'SETUP_COMPLETE=true';
+  Lines[27] := '';
   SaveStringsToFile(ConfigFile, Lines, True);
 end;
 

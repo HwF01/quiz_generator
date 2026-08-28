@@ -33,5 +33,6 @@ Thumbs.db
 
 # Packaging
 packaging/vendor/
+packaging/dist/
 packaging/quizgen.ico
 *.nupkg

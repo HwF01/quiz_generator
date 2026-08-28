@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 
 from fastapi import FastAPI, Request
@@ -64,12 +65,17 @@ async def lifespan(_app: FastAPI):
 
             await conn.run_sync(_migrate_starred_to_favorites)
         await seed()
-    try:
-        ensure_bucket()
-    except Exception:
-        logger.exception("ensure_bucket failed")
-        if not settings.allow_storage_failure:
-            raise
+    for attempt in range(1, 6):
+        try:
+            await asyncio.to_thread(ensure_bucket)
+            break
+        except Exception:
+            logger.exception("ensure_bucket failed (attempt %s/5)", attempt)
+            if attempt == 5:
+                if not settings.allow_storage_failure:
+                    raise
+            else:
+                await asyncio.sleep(attempt)
     yield
 
 

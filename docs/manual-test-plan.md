@@ -253,6 +253,9 @@ LLM 建议分两轮：
 3. 向导填真实 Key 再出一题
 4. 托盘退出；数据在 `%APPDATA%\QuizGen`
 5. SmartScreen「仍要运行」可接受性（未签名）
+6. 安装器选择 Qwen / DeepSeek 但留空 Key → 必须不能继续；便携版经 `QuizGen.cmd` 能完成首次配置
+7. 升级安装后原 `%APPDATA%\QuizGen\config.env`、数据库和上传文件仍保留
+8. 占用 3000 端口或破坏前端 `server.js` → 启动器应提示 `logs/frontend.log`，且不遗留后端进程
 
 ---
 

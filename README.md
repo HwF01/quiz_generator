@@ -10,7 +10,7 @@ AI 辅助低风险命题（练习 / 草稿），不是高风险考试全自动�
 2. 打开「智能题库生成器」快捷方式，按向导选择演示模式或填写自己的大模型 API Key
 3. 浏览器会打开 http://127.0.0.1:3000 ；托盘图标可退出
 
-数据与配置在 `%APPDATA%\QuizGen`。真实出题需要你自己的通义千问或 DeepSeek Key（安装包不预置密钥）。
+安装器采用当前用户安装，不需要管理员权限；程序位于 `%LOCALAPPDATA%\Programs\QuizGen`，数据与配置在 `%APPDATA%\QuizGen`。真实出题需要你自己的通义千问或 DeepSeek Key（安装包不预置密钥）。
 
 构建安装包见 [packaging/README.md](packaging/README.md)。未签名安装包可能被 SmartScreen 拦截，选择「仍要运行」即可。
 
@@ -73,12 +73,16 @@ npm run dev
 开发编排（映射 5432/6379/9000，backend `--reload`）：
 
 ```bash
+cp .env.example .env
 docker compose up --build
 ```
 
 生产编排（不映射数据端口，backend 无 reload，前端 standalone）：
 
 ```bash
+cp .env.example .env
+# 在 .env 中设置随机且非占位的 SECRET_KEY 后再启动：
+# python -c "import secrets; print(secrets.token_urlsafe(32))"
 docker compose -f docker-compose.prod.yml up --build
 ```
 

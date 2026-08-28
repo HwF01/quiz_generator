@@ -35,14 +35,17 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       APP_ENV: production
       DATABASE_URL: postgresql+asyncpg://quiz:quiz@postgres:5432/quizgen
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env before starting production}
     ports:
       - "8000:8000"
     depends_on:
@@ -52,6 +55,18 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     command: >
       sh -c "alembic upgrade head &&
              python -m app.seed &&
@@ -59,9 +74,11 @@ services:
 
   worker:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       APP_ENV: production
       DATABASE_URL: postgresql+asyncpg://quiz:quiz@postgres:5432/quizgen
@@ -75,13 +92,15 @@ services:
       minio:
         condition: service_started
       backend:
-        condition: service_started
+        condition: service_healthy
     command: arq app.worker.WorkerSettings
 
   frontend:
     build:
       context: ./frontend
       target: runner
+      args:
+        INTERNAL_API_URL: http://backend:8000
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
       INTERNAL_API_URL: http://backend:8000

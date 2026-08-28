@@ -9,6 +9,9 @@
 param(
     [string]$PythonVersion = "3.12.10",
     [string]$NodeVersion = "20.18.1",
+    [string]$PythonSha256 = "0eb85c2dfccccf1b17352de4c397f69194035b7d37149eacc16f1147d93de3b8",
+    [string]$NodeSha256 = "56e5aacdeee7168871721b75819ccacf2367de8761b78eaceacdecd41e04ca03",
+    [string]$GetPipSha256 = "fb24e693bab954209a063d90953621412ccad4a500905a726286e038f508ddf6",
     [switch]$SkipDownloads,
     [switch]$SkipFrontend,
     [switch]$IncludeOcr
@@ -32,14 +35,36 @@ function Assert-Command($Name) {
     }
 }
 
-function Invoke-Download($Url, $Dest) {
+function Assert-FileHash($Path, $ExpectedHash) {
+    if (-not (Test-Path $Path)) {
+        throw "Required file is missing: $Path"
+    }
+    $ActualHash = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($ActualHash -ne $ExpectedHash.ToLowerInvariant()) {
+        throw "SHA256 mismatch for $Path. Delete the cached file and rerun the build."
+    }
+}
+
+function Invoke-Download($Url, $Dest, $ExpectedHash) {
     if (Test-Path $Dest) {
-        Write-Host "Using cache $Dest"
-        return
+        try {
+            Assert-FileHash $Dest $ExpectedHash
+            Write-Host "Using verified cache $Dest"
+            return
+        } catch {
+            Write-Warning "Removing invalid cache $Dest"
+            Remove-Item -Force $Dest
+        }
     }
     Write-Host "Downloading $Url"
     $tmp = "$Dest.partial"
     Invoke-WebRequest -Uri $Url -OutFile $tmp -UseBasicParsing
+    try {
+        Assert-FileHash $tmp $ExpectedHash
+    } catch {
+        Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+        throw
+    }
     Move-Item -Force $tmp $Dest
 }
 
@@ -71,8 +96,11 @@ $PyUrl = "https://www.nuget.org/api/v2/package/python/$PythonVersion"
 $NodeUrl = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
 
 if (-not $SkipDownloads) {
-    Invoke-Download $PyUrl $PyNupkg
-    Invoke-Download $NodeUrl $NodeZip
+    Invoke-Download $PyUrl $PyNupkg $PythonSha256
+    Invoke-Download $NodeUrl $NodeZip $NodeSha256
+} else {
+    Assert-FileHash $PyNupkg $PythonSha256
+    Assert-FileHash $NodeZip $NodeSha256
 }
 
 Write-Host "==> Python runtime"
@@ -87,6 +115,9 @@ if (-not (Test-Path (Join-Path $PyTools "python.exe"))) {
 }
 Copy-Robo $PyTools (Join-Path $Payload "runtime\python")
 $PayloadPy = Join-Path $Payload "runtime\python\python.exe"
+if (-not (Test-Path (Join-Path $Payload "runtime\python\pythonw.exe"))) {
+    throw "Embedded Python is missing pythonw.exe; cannot create a no-console shortcut."
+}
 
 Write-Host "==> Installing Python packages"
 $ReqFile = Join-Path $env:TEMP "quizgen-pack-req.txt"
@@ -99,7 +130,9 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "ensurepip failed, trying get-pip.py"
     $GetPip = Join-Path $Vendor "get-pip.py"
     if (-not $SkipDownloads) {
-        Invoke-Download "https://bootstrap.pypa.io/get-pip.py" $GetPip
+        Invoke-Download "https://bootstrap.pypa.io/get-pip.py" $GetPip $GetPipSha256
+    } else {
+        Assert-FileHash $GetPip $GetPipSha256
     }
     if (-not (Test-Path $GetPip)) { throw "get-pip.py missing at $GetPip" }
     & $PayloadPy $GetPip
@@ -145,10 +178,8 @@ if (-not $SkipFrontend) {
     $Frontend = Join-Path $RepoRoot "frontend"
     Push-Location $Frontend
     try {
-        if (-not (Test-Path "node_modules")) {
-            npm ci
-            if ($LASTEXITCODE -ne 0) { npm install }
-        }
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "npm ci failed; fix package-lock.json or the npm environment before packaging." }
         $env:INTERNAL_API_URL = "http://127.0.0.1:8000"
         $env:NEXT_TELEMETRY_DISABLED = "1"
         npm run build
@@ -174,6 +205,10 @@ if (-not $SkipFrontend) {
     if (Test-Path $PublicSrc) {
         Copy-Robo $PublicSrc (Join-Path $FeDest "public")
     }
+}
+
+if (-not (Test-Path (Join-Path $Payload "app\frontend\server.js"))) {
+    throw "Frontend standalone output is missing. Do not use -SkipFrontend for a distributable zip or installer."
 }
 
 Write-Host "==> Icon"
