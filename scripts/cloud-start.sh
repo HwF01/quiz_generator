@@ -18,13 +18,15 @@ if port_up 8000; then
   echo "backend already running"
 else
   cd "$REPO_ROOT/backend"
+  # setsid detaches into a new session so the server survives after this
+  # start script returns and its process group is torn down.
   APP_ENV=local \
   REDIS_URL=memory:// \
   DATABASE_URL=sqlite+aiosqlite:///./quizgen.db \
   MOCK_LLM=true \
   SECRET_KEY=change-me-in-production \
-  nohup ./.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 \
-    > "$LOG_DIR/backend.log" 2>&1 &
+  setsid ./.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+    > "$LOG_DIR/backend.log" 2>&1 < /dev/null &
   echo "backend pid $!"
 fi
 
@@ -34,7 +36,7 @@ if port_up 3000; then
 else
   cd "$REPO_ROOT/frontend"
   INTERNAL_API_URL=http://127.0.0.1:8000 \
-  nohup npm run dev > "$LOG_DIR/frontend.log" 2>&1 &
+  setsid npm run dev > "$LOG_DIR/frontend.log" 2>&1 < /dev/null &
   echo "frontend pid $!"
 fi
 
