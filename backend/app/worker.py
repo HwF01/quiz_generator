@@ -12,4 +12,4 @@ class WorkerSettings:
     functions = [generate_quiz_job]
     redis_settings = redis_settings()
     max_jobs = 4
-    job_timeout = 60 * 20
+    job_timeout = 60 * 40

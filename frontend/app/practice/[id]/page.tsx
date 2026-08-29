@@ -16,6 +16,7 @@ type Question = {
   content: string;
   options: { key: string; text: string }[] | null;
   micro_skill: string;
+  subparts?: { id: string; prompt: string }[] | null;
   favorited?: boolean;
 };
 
@@ -34,12 +35,14 @@ type Result = {
   score: number;
   correct: number;
   total: number;
-  details: { question_id: string; correct: boolean; answer: unknown; explanation?: string }[];
+  graded_total?: number;
+  pending_ai_grading?: number;
+  details: { question_id: string; correct: boolean | null; answer: unknown; explanation?: string }[];
   weak_skills: string[];
   mastery: Record<string, number>;
 };
 
-type AnswerValue = string | string[];
+type AnswerValue = string | string[] | Record<string, string>;
 
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items];
@@ -48,6 +51,11 @@ function shuffle<T>(items: T[]): T[] {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+function isConstructedQuestion(question: Question): boolean {
+  return ["fill_blank", "application", "proof", "short_answer"].includes(question.type)
+    && Boolean(question.subparts?.length);
 }
 
 export default function PracticePage() {
@@ -69,6 +77,7 @@ export default function PracticePage() {
   const [msg, setMsg] = useState("");
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [gradingQuestionId, setGradingQuestionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
@@ -109,18 +118,26 @@ export default function PracticePage() {
 
   function isChecked(qid: string, key: string) {
     const v = answers[qid];
-    return Array.isArray(v) ? v.includes(key) : v === key;
+    return Array.isArray(v) ? v.includes(key) : typeof v === "string" && v === key;
   }
 
   function pickSingle(qid: string, key: string) {
-    setAnswers({ ...answers, [qid]: key });
+    setAnswers((current) => ({ ...current, [qid]: key }));
   }
 
   function toggleMulti(qid: string, key: string) {
     const cur = answers[qid];
     const arr = Array.isArray(cur) ? cur : [];
     const next = arr.includes(key) ? arr.filter((k) => k !== key) : [...arr, key];
-    setAnswers({ ...answers, [qid]: next });
+    setAnswers((current) => ({ ...current, [qid]: next }));
+  }
+
+  function setSubpartAnswer(questionId: string, partId: string, value: string) {
+    setAnswers((current) => {
+      const answer = current[questionId];
+      const parts = typeof answer === "object" && answer && !Array.isArray(answer) ? answer : {};
+      return { ...current, [questionId]: { ...parts, [partId]: value } };
+    });
   }
 
   function requestRemoveCurrent() {
@@ -192,6 +209,33 @@ export default function PracticePage() {
     }
   }
 
+  async function gradeQuestion(questionId: string) {
+    if (!playDetail || gradingQuestionId) return;
+    setGradingQuestionId(questionId);
+    setMsg("");
+    try {
+      await api(`/plays/${playDetail.id}/questions/${questionId}/ai-grade`, { method: "POST" });
+      const detail = await api<PlayDetail>(`/plays/${playDetail.id}`);
+      setPlayDetail(detail);
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              score: detail.score,
+              correct: detail.correct,
+              total: detail.total,
+              graded_total: detail.graded_total,
+              pending_ai_grading: detail.pending_ai_grading,
+            }
+          : current
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "AI 批改失败");
+    } finally {
+      setGradingQuestionId(null);
+    }
+  }
+
   async function submitRating(score: number) {
     if (!quiz || qFilter || rateBusy) return;
     setRating(score);
@@ -226,25 +270,37 @@ export default function PracticePage() {
     const score = playDetail?.score ?? result.score;
     const correct = playDetail?.correct ?? result.correct;
     const total = playDetail?.total ?? result.total;
+    const gradedTotal = playDetail?.graded_total ?? result.graded_total ?? total;
+    const pendingAiGrading = playDetail?.pending_ai_grading ?? result.pending_ai_grading ?? 0;
     return (
       <div className="space-y-4">
         <div className="card space-y-3 p-4 sm:p-6">
           <h1 className="text-2xl font-semibold break-words">{quiz.title}</h1>
           <p className="text-sm text-slate-500">
-            {score} 分 · 答对 {correct}/{total} · 用时 {seconds} 秒
+            {score} 分 · 已判 {gradedTotal}/{total} 题 · 答对 {correct} 题 · 用时 {seconds} 秒
           </p>
+          {pendingAiGrading > 0 && (
+            <p className="text-sm text-amber-700">还有 {pendingAiGrading} 道主观题等待 AI 辅助批改。</p>
+          )}
           {result.weak_skills.length > 0 && (
             <p className="text-sm text-amber-700">薄弱微技能：{result.weak_skills.join("、")}</p>
           )}
           {msg && <p className="text-sm text-red-600">{msg}</p>}
         </div>
         {playDetail ? (
-          <PlayDetailCards details={playDetail.details} />
+          <PlayDetailCards
+            details={playDetail.details}
+            gradingQuestionId={gradingQuestionId}
+            onGrade={(questionId) => void gradeQuestion(questionId)}
+          />
         ) : (
           <ul className="card space-y-2 p-4 text-sm sm:p-6">
             {result.details.map((d, i) => (
-              <li key={d.question_id} className={d.correct ? "text-green-700" : "text-red-700"}>
-                第 {i + 1} 题 {d.correct ? "正确" : "错误"} {d.explanation ? `· ${d.explanation}` : ""}
+              <li
+                key={d.question_id}
+                className={d.correct === null ? "text-amber-700" : d.correct ? "text-green-700" : "text-red-700"}
+              >
+                第 {i + 1} 题 {d.correct === null ? "待 AI 批改" : d.correct ? "正确" : "错误"} {d.explanation ? `· ${d.explanation}` : ""}
               </li>
             ))}
           </ul>
@@ -314,11 +370,43 @@ export default function PracticePage() {
       <p className="break-words text-lg">{q.content}</p>
       <p className="text-xs text-slate-400">微技能 {q.micro_skill}</p>
       {msg && <p className="text-sm text-red-600">{msg}</p>}
-      {q.type === "fill_blank" ? (
+      {isConstructedQuestion(q) ? (
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-medium text-slate-700">请逐小问作答</legend>
+          {q.subparts?.map((part, partIndex) => {
+            const current = answers[q.id];
+            const value =
+              typeof current === "object" && current && !Array.isArray(current) ? current[part.id] || "" : "";
+            const compact = q.type === "fill_blank";
+            return (
+              <label key={part.id} className="block space-y-1.5">
+                <span className="text-sm font-medium text-slate-700">
+                  第 {partIndex + 1} 问：{part.prompt}
+                </span>
+                {compact ? (
+                  <input
+                    className="input"
+                    value={value}
+                    onChange={(e) => setSubpartAnswer(q.id, part.id, e.target.value)}
+                    placeholder="填写答案"
+                  />
+                ) : (
+                  <textarea
+                    className="input min-h-28"
+                    value={value}
+                    onChange={(e) => setSubpartAnswer(q.id, part.id, e.target.value)}
+                    placeholder="写下你的推导、论证或答案"
+                  />
+                )}
+              </label>
+            );
+          })}
+        </fieldset>
+      ) : q.type === "fill_blank" ? (
         <input
           className="input"
           value={typeof answers[q.id] === "string" ? (answers[q.id] as string) : ""}
-          onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+          onChange={(e) => setAnswers((current) => ({ ...current, [q.id]: e.target.value }))}
           placeholder="填写答案"
         />
       ) : (

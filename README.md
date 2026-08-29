@@ -34,6 +34,7 @@ AI 辅助低风险命题（练习 / 草稿），不是高风险考试全自动�
 | `REDIS_URL` | `memory://` 或本机 Redis | `memory://` |
 | `SECRET_KEY` | local 可用占位 | 安装时随机生成 |
 | `MOCK_LLM` / LLM Key | 无 Key 则 mock | 向导里选演示或自备 Key |
+| `TAVILY_API_KEY` | 可选；启用“联网补充知识”时必填 | 可在配置中填写；未配置时该选项不可用 |
 | MinIO 一组变量 | Docker 用 | 忽略 |
 
 开发者不要用 Docker 版 `DATABASE_URL=...@postgres` 去跑本机 SQLite 路径。密钥只放本机 `.env` / `config.env`，不要提交。
@@ -86,7 +87,7 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up --build
 ```
 
-Postgres 路径用 Alembic：`alembic upgrade head`（含 `002_fk_jsonb`）。
+Postgres 路径用 Alembic：`alembic upgrade head`（含题目小问、外部来源与 AI 批改记录迁移）。
 
 ## 已核对的配置缺口
 

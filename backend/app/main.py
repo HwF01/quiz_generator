@@ -64,6 +64,31 @@ async def lifespan(_app: FastAPI):
                 )
 
             await conn.run_sync(_migrate_starred_to_favorites)
+
+            def _ensure_subjective_columns(sync_conn):
+                from sqlalchemy import inspect
+
+                insp = inspect(sync_conn)
+                additions = {
+                    "questions": {
+                        "subparts": "JSON",
+                        "external_sources": "JSON",
+                    },
+                    "play_records": {
+                        "ai_grades": "JSON NOT NULL DEFAULT '{}'",
+                    },
+                }
+                for table, columns in additions.items():
+                    if not insp.has_table(table):
+                        continue
+                    existing = {column["name"] for column in insp.get_columns(table)}
+                    for name, definition in columns.items():
+                        if name not in existing:
+                            sync_conn.execute(
+                                text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+                            )
+
+            await conn.run_sync(_ensure_subjective_columns)
         await seed()
     for attempt in range(1, 6):
         try:

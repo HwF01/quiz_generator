@@ -21,10 +21,12 @@ from app.models.quiz_rating import QuizRating
 from app.models.quiz_set import QuizSet
 from app.models.user import User
 from app.schemas.quiz import GenerateQuizIn, QuestionUpdateIn, QuizUpdateIn, RatingIn
+from app.services.blueprint import subject_tags_for, validate_type_counts
 from app.services.distractor_engine import build_choice_question
 from app.services.quality_gates import apply_gates, choice_structure_valid
 from app.services.quota import assert_quota, incr_quota
 from app.services.quiz_title import uniquify_title
+from app.services.subjective_grading import is_constructed, rubric_valid
 
 logger = logging.getLogger("quizgen")
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
@@ -54,7 +56,9 @@ def _q_out(q: Question) -> dict:
         "knowledge_tags": q.knowledge_tags,
         "micro_skill": q.micro_skill,
         "cognitive_level": q.cognitive_level,
+        "subparts": q.subparts,
         "source_span": q.source_span,
+        "external_sources": q.external_sources,
         "quality_scores": q.quality_scores,
         "needs_review": q.needs_review,
     }
@@ -114,6 +118,16 @@ async def generate(
     db: AsyncSession = Depends(get_db),
 ):
     await assert_quota(user.id, user.daily_gen_quota)
+    if body.blueprint.enable_web_search and not settings.web_search_available:
+        raise AppError("管理员尚未配置联网检索服务", code=503, status_code=503)
+    if body.blueprint.allocation_mode == "manual":
+        try:
+            validate_type_counts(
+                body.blueprint.type_counts,
+                body.blueprint.subject_tags or subject_tags_for(body.subject),
+            )
+        except ValueError as exc:
+            raise AppError(str(exc), code=400) from exc
     doc = await db.get(Document, body.document_id)
     if not doc or doc.owner_id != user.id:
         raise AppError("文档不存在", code=404, status_code=404)
@@ -244,6 +258,14 @@ async def get_quiz(
             q.pop("explanation", None)
             q.pop("distractor_rationale", None)
             q.pop("quality_scores", None)
+            q.pop("source_span", None)
+            q.pop("external_sources", None)
+            if q.get("subparts"):
+                q["subparts"] = [
+                    {"id": part.get("id"), "prompt": part.get("prompt")}
+                    for part in q["subparts"]
+                    if isinstance(part, dict)
+                ]
     return ok(_quiz_out(quiz, {"questions": questions}))
 
 
@@ -315,19 +337,33 @@ async def patch_question(
         "type": q.type,
         "options": body.options if body.options is not None else q.options,
         "answer": body.answer if body.answer is not None else q.answer,
+        "subparts": body.subparts if body.subparts is not None else q.subparts,
     }
     structure_ok = choice_structure_valid(candidate)
-    if body.needs_review is False and not structure_ok:
+    rubric_ok = not is_constructed(candidate) or rubric_valid(candidate.get("subparts"))
+    if body.needs_review is False and (not structure_ok or not rubric_ok):
+        if is_constructed(candidate):
+            raise AppError("请先补全小问、正解和评分量规，再标记已审", code=400)
         raise AppError("请先补全 4 个不同选项并指定唯一正解，再标记已审", code=400)
-    for field in ("content", "options", "answer", "explanation", "needs_review"):
+    for field in (
+        "content",
+        "options",
+        "answer",
+        "explanation",
+        "subparts",
+        "external_sources",
+        "needs_review",
+    ):
         val = getattr(body, field)
         if val is not None:
             setattr(q, field, val)
-    if not structure_ok:
+    if not structure_ok or not rubric_ok:
         scores = q.quality_scores or {}
         reasons = list(scores.get("review_reasons") or [])
         if "invalid_choice_structure" not in reasons:
             reasons.append("invalid_choice_structure")
+        if not rubric_ok and "invalid_grading_rubric" not in reasons:
+            reasons.append("invalid_grading_rubric")
         scores["review_reasons"] = reasons
         q.quality_scores = scores
         q.needs_review = True
@@ -396,6 +432,8 @@ async def harden_question(
         raise AppError("无权操作", code=403, status_code=403)
     if quiz.is_builtin:
         raise AppError("内置题库不可修改", code=403, status_code=403)
+    if q.type != "single_choice":
+        raise AppError("仅单选题支持重新生成干扰项", code=400)
     span = q.source_span or {}
     doc = await db.get(Document, quiz.document_id) if quiz.document_id else None
     passage = _source_passage(doc, q)

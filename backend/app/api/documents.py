@@ -10,6 +10,8 @@ from app.core.exceptions import AppError, ok
 from app.db.session import get_db
 from app.models.document import Document
 from app.models.user import User
+from app.schemas.quiz import GenerationPreviewIn
+from app.services.generation_preview import prepare_generation_preview
 from app.services.storage import upload_bytes
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -66,3 +68,21 @@ async def upload(
     except Exception as exc:
         raise AppError("保存文档失败，请稍后重试", code=500, status_code=500) from exc
     return ok({"id": doc.id, "filename": doc.filename, "size_bytes": doc.size_bytes})
+
+
+@router.post("/{document_id}/generation-preview")
+async def generation_preview(
+    document_id: str,
+    body: GenerationPreviewIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    doc = await db.get(Document, document_id)
+    if not doc or doc.owner_id != user.id:
+        raise AppError("文档不存在", code=404, status_code=404)
+    try:
+        preview = await prepare_generation_preview(db, doc, body.blueprint, body.subject)
+    except ValueError as exc:
+        raise AppError(str(exc), code=400) from exc
+    preview["web_search_available"] = settings.web_search_available
+    return ok(preview)

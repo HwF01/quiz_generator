@@ -12,6 +12,7 @@ class PlayRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(36), ForeignKey("quiz_sets.id", ondelete="CASCADE"), index=True
     )
     answers: Mapped[dict] = mapped_column(JSON, default=dict)
+    ai_grades: Mapped[dict] = mapped_column(JSON, default=dict)
     skill_results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     score: Mapped[float] = mapped_column(Float, default=0)
     time_spent: Mapped[int] = mapped_column(Integer, default=0)

@@ -14,16 +14,15 @@ from app.models.quiz_set import QuizSet
 from app.schemas.quiz import QuizBlueprint
 from app.services.blueprint import allocate, enforce_detail_cap
 from app.services.cache import content_hash, remember_doc_quiz, similar_doc_quiz
-from app.services.chunking import split_paragraphs
-from app.services.doc_parser import parse_document
 from app.services.distractor_engine import build_choice_question
-from app.services.passage_map import classify_subject, map_passages
+from app.services.generation_preview import prepare_generation_preview
 from app.services.progress import set_progress
 from app.services.quality_gates import apply_gates
 from app.services.quiz_generator import extract_key_items, generate_stem
 from app.services.quota import decr_quota
-from app.services.storage import download_bytes
 from app.services.llm.router import critic_provider, generator_provider
+from app.services.subjective_grading import build_grading_rubric
+from app.services.web_search import search_related_knowledge, topic_queries
 
 logger = logging.getLogger(__name__)
 _GEN_SEM = asyncio.Semaphore(4)
@@ -46,7 +45,9 @@ async def _clone_questions(db: AsyncSession, src_quiz_id: str, dest_quiz_id: str
                 knowledge_tags=q.knowledge_tags,
                 micro_skill=q.micro_skill,
                 cognitive_level=q.cognitive_level,
+                subparts=q.subparts,
                 source_span=q.source_span,
+                external_sources=q.external_sources,
                 quality_scores=q.quality_scores,
                 needs_review=q.needs_review,
                 source_chunk_id=q.source_chunk_id,
@@ -66,23 +67,28 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
     quiz = await db.get(QuizSet, job.quiz_set_id) if job.quiz_set_id else None
     try:
         await set_progress(db, job, 5, "解析文档", "running")
-        data = await asyncio.to_thread(download_bytes, doc.object_key)
-        parsed = await asyncio.to_thread(parse_document, doc.filename, data)
-        if parsed.error and not parsed.text:
-            raise RuntimeError(parsed.error)
-        doc.extracted_text = parsed.text
-        doc.extracted_chars = len(parsed.text)
-        doc.used_ocr = parsed.used_ocr
-        doc.content_hash = content_hash(parsed.text)
-        doc.status = "parsed"
-        await db.commit()
-
         cfg = job.config or {}
         force = bool(cfg.get("force"))
+        blueprint = QuizBlueprint.model_validate(cfg.get("blueprint") or {})
+        subject_hint = cfg.get("subject") or "auto"
+        preview = await prepare_generation_preview(db, doc, blueprint, subject_hint)
+        subject = preview["subject"]
+        resolved_tags = preview["subject_tags"]
+        blueprint = blueprint.model_copy(update={"subject_tags": resolved_tags})
+        mapped = doc.passage_map or []
+        parsed_text = doc.extracted_text or ""
+        cache_config = {
+            "subject": subject,
+            "blueprint": blueprint.model_dump(mode="json"),
+        }
+        if quiz:
+            quiz.subject = subject
+            quiz.blueprint = blueprint.model_dump(mode="json")
+
         reused_id = None
         if doc.content_hash and not force:
             try:
-                reused_id = await similar_doc_quiz(doc.content_hash)
+                reused_id = await similar_doc_quiz(job.user_id, doc.content_hash, cache_config)
             except Exception:
                 reused_id = None
         if reused_id and quiz and reused_id != quiz.id:
@@ -97,31 +103,27 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
                 await set_progress(db, job, 100, "完成（复用已有题库）", "succeeded")
                 return
 
-        subject_hint = cfg.get("subject") or "auto"
-        blueprint = QuizBlueprint.model_validate(cfg.get("blueprint") or {})
         await set_progress(db, job, 15, "科目识别与篇章映射")
-        subject = await classify_subject(parsed.text[:4000], subject_hint)
-        if quiz:
-            quiz.subject = subject
-        chunks = split_paragraphs(parsed.text)
-        mapped = await map_passages(chunks, subject, blueprint.target_grade)
-        doc.passage_map = mapped
-        await db.commit()
 
         suitable = [m for m in mapped if not m.get("unsuitable")]
         if not suitable:
             raise RuntimeError("文档中没有适合出题的段落，请检查材料或换一份文档")
 
         await set_progress(db, job, 30, "抽取关键句")
+        async def extract_for_passage(passage: dict) -> list[dict]:
+            async with _GEN_SEM:
+                return await extract_key_items(passage["text"], subject)
+
+        selected_passages = suitable[: settings.max_key_sentences]
+        extracted = await asyncio.gather(
+            *(extract_for_passage(passage) for passage in selected_passages)
+        )
         key_items: list[dict] = []
-        for m in suitable:
-            items = await extract_key_items(m["text"], subject)
+        for m, items in zip(selected_passages, extracted):
             for it in items:
                 it["chunk_id"] = m["chunk_id"]
                 it["passage"] = m["text"]
                 key_items.append(it)
-            if len(key_items) >= settings.max_key_sentences:
-                break
         unique_items: list[dict] = []
         seen_quotes: set[str] = set()
         for item in key_items:
@@ -129,9 +131,20 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
             if quote and quote not in seen_quotes:
                 seen_quotes.add(quote)
                 unique_items.append(item)
-        target = min(blueprint.total_questions, settings.max_questions)
+        target = blueprint.total_questions
         key_items = unique_items[:target]
-        allocs = allocate(len(key_items), blueprint)
+        suggested_types = [
+            kind
+            for item in suitable
+            for kind in (item.get("suggested_types") or [])
+            if isinstance(kind, str)
+        ]
+        allocs = allocate(
+            len(key_items),
+            blueprint,
+            subject_tags=resolved_tags,
+            suggested_types=suggested_types,
+        )
         gen = generator_provider(subject)
         cri = critic_provider()
         job.models_used = {
@@ -140,22 +153,52 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
             "critic": getattr(cri, "name", "critic"),
             "critic_model": getattr(cri, "model", ""),
             "subject": subject,
+            "subject_tags": resolved_tags,
         }
+        if len(key_items) < target:
+            job.models_used["shortfall_reason"] = "可溯源关键句不足，已按质量优先减少题量"
         await db.commit()
 
         total = len(key_items)
         if not key_items:
             raise RuntimeError("未能从材料中提取可溯源的考查内容，请补充更完整的教学文本")
 
+        external_sources: list[dict] = []
+        if blueprint.enable_web_search:
+            await set_progress(db, job, 35, "检索补充知识")
+            external_sources = await search_related_knowledge(topic_queries(key_items, subject))
+            job.models_used = {
+                **(job.models_used or {}),
+                "web_search": "tavily",
+                "web_sources": str(len(external_sources)),
+            }
+            await db.commit()
+
         async def _build_one(i: int, item: dict, alloc) -> dict | None:
             async with _GEN_SEM:
                 passage = item["passage"]
-                stem = await generate_stem(passage, item, alloc, subject)
+                stem = await generate_stem(passage, item, alloc, subject, external_sources)
                 if stem.get("_generation_error"):
                     logger.warning("skip incomplete stem job=%s item=%s", job_id, i)
                     return None
                 q = await build_choice_question(stem, passage, item["chunk_id"])
-                return await apply_gates(q, passage)
+                source_ids = set(stem.get("external_source_ids") or [])
+                known_ids = {source["id"] for source in external_sources}
+                if source_ids - known_ids:
+                    q["needs_review"] = True
+                    scores = q.get("quality_scores") or {}
+                    scores["review_reasons"] = [
+                        *scores.get("review_reasons", []),
+                        "invalid_external_source",
+                    ]
+                    q["quality_scores"] = scores
+                q["external_sources"] = [
+                    {**source, "used": source["id"] in source_ids}
+                    for source in external_sources
+                    if source["id"] in source_ids
+                ]
+                q = await build_grading_rubric(q, passage)
+                return await apply_gates(q, passage, subject_tags=resolved_tags)
 
         built = await asyncio.gather(
             *[_build_one(i, item, alloc) for i, (item, alloc) in enumerate(zip(key_items, allocs))]
@@ -190,7 +233,9 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
                     knowledge_tags=q.get("knowledge_tags") or [],
                     micro_skill=q.get("micro_skill") or "detail",
                     cognitive_level=q.get("cognitive_level") or "remember",
+                    subparts=q.get("subparts"),
                     source_span=q.get("source_span"),
+                    external_sources=q.get("external_sources"),
                     quality_scores=q.get("quality_scores"),
                     needs_review=bool(q.get("needs_review")),
                     source_chunk_id=q.get("source_chunk_id"),
@@ -199,11 +244,11 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         quiz.question_count = len(questions)
         quiz.status = "ready"
         quiz.subject = subject
-        quiz.blueprint = blueprint.model_dump()
+        quiz.blueprint = blueprint.model_dump(mode="json")
         if any(question.get("needs_review") for question in questions):
             quiz.visibility = "private"
             quiz.is_public = False
-        await remember_doc_quiz(doc.content_hash, quiz.id)
+        await remember_doc_quiz(job.user_id, doc.content_hash or content_hash(parsed_text), cache_config, quiz.id)
         await db.commit()
         await set_progress(
             db,

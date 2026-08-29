@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
@@ -16,10 +18,12 @@ from app.models.question_favorite import QuestionFavorite
 from app.models.quiz_set import QuizSet
 from app.models.user import User
 from app.models.wrong_question import WrongQuestion
-from app.schemas.quiz import PlaySubmitIn
+from app.schemas.quiz import PlayAnswerUpdateIn, PlaySubmitIn
 from app.services.knowledge_tracing import apply_play, recommend_difficulty
+from app.services.subjective_grading import grade_constructed_response, normalize_answer
 
 router = APIRouter(tags=["practice"])
+_AI_GRADABLE_TYPES = {"fill_blank", "application", "proof", "short_answer"}
 
 
 def _is_correct(question: Question, user_answer) -> bool:
@@ -33,8 +37,86 @@ def _is_correct(question: Question, user_answer) -> bool:
     return str(user_answer) in keys
 
 
+def _requires_ai_grading(question: Question) -> bool:
+    return question.type in _AI_GRADABLE_TYPES and bool(question.subparts)
+
+
+def _answer_fingerprint(answer: object) -> str:
+    raw = json.dumps(answer, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _fill_exact_match(question: Question, user_answer: object) -> bool:
+    if question.type != "fill_blank":
+        return False
+    if not question.subparts:
+        return _is_correct(question, user_answer)
+    submitted = normalize_answer(_question_payload(question), user_answer)
+    expected = {
+        str(part.get("id")): {
+            str(text).strip().lower() for text in part.get("texts") or [] if str(text).strip()
+        }
+        for part in (question.answer or {}).get("subparts") or []
+        if isinstance(part, dict)
+    }
+    return bool(expected) and all(
+        str(submitted.get(part_id) or "").strip().lower() in texts for part_id, texts in expected.items()
+    )
+
+
+def _question_payload(question: Question) -> dict:
+    return {
+        "id": question.id,
+        "type": question.type,
+        "content": question.content,
+        "answer": question.answer,
+        "subparts": question.subparts,
+        "external_sources": question.external_sources,
+    }
+
+
+def _score_summary(questions: list[Question], answers: dict, ai_grades: dict) -> dict:
+    percentages: list[float] = []
+    pending = 0
+    correct = 0
+    for question in questions:
+        if _requires_ai_grading(question):
+            grade = ai_grades.get(question.id) or {}
+            if grade.get("status") != "graded":
+                pending += 1
+                continue
+            percent = float(grade.get("percent") or 0)
+            percentages.append(percent)
+            if percent >= 60:
+                correct += 1
+            continue
+        ok_flag = _is_correct(question, answers.get(question.id))
+        percentages.append(100.0 if ok_flag else 0.0)
+        if ok_flag:
+            correct += 1
+    return {
+        "score": round(sum(percentages) / len(percentages), 1) if percentages else 0.0,
+        "graded_total": len(percentages),
+        "pending_ai_grading": pending,
+        "correct": correct,
+    }
+
+
+async def _add_wrong_question(
+    db: AsyncSession, user_id: str, question: Question, quiz_id: str, *, increment: bool
+) -> None:
+    existing = await db.get(WrongQuestion, (user_id, question.id))
+    if existing:
+        if increment:
+            existing.wrong_count += 1
+            existing.last_wrong_at = datetime.now(timezone.utc)
+        return
+    db.add(WrongQuestion(user_id=user_id, question_id=question.id, quiz_set_id=quiz_id))
+
+
 async def _play_question_details(db: AsyncSession, rec: PlayRecord) -> list[dict]:
     answer_map = rec.answers if isinstance(rec.answers, dict) else {}
+    ai_grades = rec.ai_grades if isinstance(rec.ai_grades, dict) else {}
     rows = await db.execute(select(Question).where(Question.quiz_set_id == rec.quiz_set_id))
     questions = list(rows.scalars().all())
     by_id = {q.id: q for q in questions}
@@ -83,9 +165,16 @@ async def _play_question_details(db: AsyncSession, rec: PlayRecord) -> list[dict
                 "options": q.options,
                 "user_answer": ua,
                 "answer": q.answer,
-                "correct": _is_correct(q, ua),
+                "correct": (
+                    (float((ai_grades.get(q.id) or {}).get("percent") or 0) >= 60)
+                    if (ai_grades.get(q.id) or {}).get("status") == "graded"
+                    else (None if _requires_ai_grading(q) else _is_correct(q, ua))
+                ),
                 "explanation": q.explanation,
                 "micro_skill": q.micro_skill,
+                "subparts": q.subparts,
+                "external_sources": q.external_sources,
+                "ai_grade": ai_grades.get(q.id),
             }
         )
     return details
@@ -111,25 +200,32 @@ async def submit_play(
             raise AppError("题目不存在或不属于该题库")
     details = []
     skill_results: dict[str, list[bool]] = {}
-    correct_n = 0
+    ai_grades: dict[str, dict] = {}
     for q in questions:
         ua = body.answers.get(q.id)
+        if _requires_ai_grading(q):
+            normalized = normalize_answer(_question_payload(q), ua)
+            ai_grades[q.id] = {
+                "status": "pending",
+                "answer_hash": _answer_fingerprint(normalized),
+                "prompt_version": "grade_constructed_response:v1",
+                "exact_match": _fill_exact_match(q, ua) if q.type == "fill_blank" else None,
+            }
+            details.append(
+                {
+                    "question_id": q.id,
+                    "correct": None,
+                    "grading_status": "pending",
+                    "user_answer": ua,
+                    "answer": q.answer,
+                    "explanation": q.explanation,
+                    "micro_skill": q.micro_skill,
+                }
+            )
+            continue
         ok_flag = _is_correct(q, ua)
-        if ok_flag:
-            correct_n += 1
-        else:
-            existing = await db.get(WrongQuestion, (user.id, q.id))
-            if existing:
-                existing.wrong_count += 1
-                existing.last_wrong_at = datetime.now(timezone.utc)
-            else:
-                db.add(
-                    WrongQuestion(
-                        user_id=user.id,
-                        question_id=q.id,
-                        quiz_set_id=quiz_id,
-                    )
-                )
+        if not ok_flag:
+            await _add_wrong_question(db, user.id, q, quiz_id, increment=True)
         skill_results.setdefault(q.micro_skill, []).append(ok_flag)
         details.append(
             {
@@ -142,9 +238,7 @@ async def submit_play(
             }
         )
     skill_bool = {k: all(v) if v else False for k, v in skill_results.items()}
-    # more useful: majority per skill
     skill_bool = {k: (sum(v) / len(v) >= 0.6) for k, v in skill_results.items() if v}
-    import json
 
     mastery: dict = {}
     try:
@@ -155,12 +249,14 @@ async def submit_play(
         await redis.set(f"mastery:{user.id}", json.dumps(mastery), ex=60 * 60 * 24 * 90)
     except Exception:
         mastery = apply_play({}, skill_bool)
+    score_summary = _score_summary(questions, body.answers, ai_grades)
     rec = PlayRecord(
         user_id=user.id,
         quiz_set_id=quiz_id,
         answers=body.answers,
+        ai_grades=ai_grades,
         skill_results={k: sum(v) / len(v) for k, v in skill_results.items() if v},
-        score=round(100.0 * correct_n / len(questions), 1),
+        score=score_summary["score"],
         time_spent=body.time_spent,
         mode=body.mode,
     )
@@ -173,8 +269,10 @@ async def submit_play(
         {
             "record_id": rec.id,
             "score": rec.score,
-            "correct": correct_n,
+            "correct": score_summary["correct"],
             "total": len(questions),
+            "graded_total": score_summary["graded_total"],
+            "pending_ai_grading": score_summary["pending_ai_grading"],
             "details": details,
             "skill_results": rec.skill_results,
             "weak_skills": weak,
@@ -182,6 +280,104 @@ async def submit_play(
                 s: recommend_difficulty(mastery, s) for s in skill_results
             },
             "mastery": mastery,
+        }
+    )
+
+
+@router.patch("/plays/{play_id}/questions/{question_id}/answer")
+async def update_constructed_answer(
+    play_id: str,
+    question_id: str,
+    body: PlayAnswerUpdateIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rec = await db.get(PlayRecord, play_id)
+    if not rec or rec.user_id != user.id:
+        raise AppError("练习记录不存在", code=404, status_code=404)
+    question = await db.get(Question, question_id)
+    if not question or question.quiz_set_id != rec.quiz_set_id or not _requires_ai_grading(question):
+        raise AppError("主观题不存在或不支持 AI 批改", code=404, status_code=404)
+    normalized = normalize_answer(_question_payload(question), body.answer)
+    if not any(normalized.values()):
+        raise AppError("请先完成至少一个小问", code=400)
+    answers = dict(rec.answers or {})
+    answers[question_id] = normalized
+    grades = dict(rec.ai_grades or {})
+    grades[question_id] = {
+        "status": "pending",
+        "answer_hash": _answer_fingerprint(normalized),
+        "prompt_version": "grade_constructed_response:v1",
+        "exact_match": _fill_exact_match(question, normalized)
+        if question.type == "fill_blank"
+        else None,
+    }
+    rows = await db.execute(select(Question).where(Question.quiz_set_id == rec.quiz_set_id))
+    questions = list(rows.scalars().all())
+    rec.answers = answers
+    rec.ai_grades = grades
+    rec.score = _score_summary(questions, answers, grades)["score"]
+    await db.commit()
+    return ok({"question_id": question_id, "grading_status": "pending", "score": rec.score})
+
+
+@router.post("/plays/{play_id}/questions/{question_id}/ai-grade")
+async def grade_play_question(
+    play_id: str,
+    question_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rec = await db.get(PlayRecord, play_id)
+    if not rec or rec.user_id != user.id:
+        raise AppError("练习记录不存在", code=404, status_code=404)
+    question = await db.get(Question, question_id)
+    if not question or question.quiz_set_id != rec.quiz_set_id or not _requires_ai_grading(question):
+        raise AppError("主观题不存在或不支持 AI 批改", code=404, status_code=404)
+    answers = dict(rec.answers or {})
+    normalized = normalize_answer(_question_payload(question), answers.get(question_id))
+    if not any(normalized.values()):
+        raise AppError("请先完成至少一个小问", code=400)
+    answer_hash = _answer_fingerprint(normalized)
+    grades = dict(rec.ai_grades or {})
+    previous = grades.get(question_id) or {}
+    if previous.get("status") == "graded" and previous.get("answer_hash") == answer_hash:
+        return ok({"grade": previous, "score": rec.score, "cached": True})
+
+    grade = await grade_constructed_response(_question_payload(question), normalized)
+    grade["answer_hash"] = answer_hash
+    grade["prompt_version"] = "grade_constructed_response:v1"
+    grade["graded_at"] = datetime.now(timezone.utc).isoformat()
+    grades[question_id] = grade
+    rows = await db.execute(select(Question).where(Question.quiz_set_id == rec.quiz_set_id))
+    questions = list(rows.scalars().all())
+    score_summary = _score_summary(questions, answers, grades)
+    rec.ai_grades = grades
+    rec.score = score_summary["score"]
+    if grade["status"] == "graded":
+        passed = float(grade.get("percent") or 0) >= 60
+        if not passed:
+            await _add_wrong_question(db, user.id, question, rec.quiz_set_id, increment=False)
+        if previous.get("status") != "graded":
+            updated_skills = dict(rec.skill_results or {})
+            updated_skills[question.micro_skill] = 1.0 if passed else 0.0
+            rec.skill_results = updated_skills
+            try:
+                redis = get_redis()
+                raw = await redis.get(f"mastery:{user.id}")
+                mastery = json.loads(raw) if raw else {}
+                mastery = apply_play(mastery, {question.micro_skill: passed})
+                await redis.set(f"mastery:{user.id}", json.dumps(mastery), ex=60 * 60 * 24 * 90)
+            except Exception:
+                pass
+    await db.commit()
+    return ok(
+        {
+            "grade": grade,
+            "score": rec.score,
+            "graded_total": score_summary["graded_total"],
+            "pending_ai_grading": score_summary["pending_ai_grading"],
+            "cached": False,
         }
     )
 
@@ -226,6 +422,10 @@ async def play_detail(
     quiz = await db.get(QuizSet, rec.quiz_set_id)
     details = await _play_question_details(db, rec)
     correct_n = sum(1 for d in details if d.get("correct"))
+    pending_ai_grading = sum(
+        1 for detail in details if (detail.get("ai_grade") or {}).get("status") == "pending"
+    )
+    graded_total = sum(1 for detail in details if detail.get("correct") is not None)
     payload = {
         "id": rec.id,
         "quiz_id": rec.quiz_set_id,
@@ -237,6 +437,8 @@ async def play_detail(
         "skill_results": rec.skill_results or {},
         "correct": correct_n,
         "total": len(details),
+        "graded_total": graded_total,
+        "pending_ai_grading": pending_ai_grading,
         "details": details,
     }
     return ok(payload)

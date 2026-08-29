@@ -7,15 +7,23 @@ export type EditableQuestion = {
   type: string;
   content: string;
   options: { key: string; text: string }[] | null;
-  answer: { keys?: string[]; texts?: string[] };
+  answer: {
+    keys?: string[];
+    texts?: string[];
+    subparts?: { id: string; texts?: string[]; expected_points?: string[] }[];
+  };
   explanation?: string;
+  subparts?: { id: string; prompt: string; rubric?: unknown }[] | null;
+  external_sources?: unknown[] | null;
 };
 
 export type QuestionPatch = {
   content: string;
   options: { key: string; text: string }[] | null;
-  answer: { keys?: string[]; texts?: string[] };
+  answer: EditableQuestion["answer"];
   explanation: string;
+  subparts?: { id: string; prompt: string; rubric?: unknown }[] | null;
+  external_sources?: unknown[] | null;
 };
 
 type Props = {
@@ -42,13 +50,32 @@ function typeLabel(type: string): string {
   if (type === "multi_choice") return "多选";
   if (type === "true_false") return "判断";
   if (type === "fill_blank") return "填空";
+  if (type === "application") return "应用";
+  if (type === "proof") return "证明";
+  if (type === "short_answer") return "简答";
   return type;
+}
+
+function parseArray(text: string, label: string): unknown[] {
+  const parsed: unknown = JSON.parse(text);
+  if (!Array.isArray(parsed)) throw new Error(`${label}必须是 JSON 数组`);
+  return parsed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 export function QuestionEditDialog({ question, busy, error, onClose, onSave }: Props) {
   const choiceLike = question.type === "single_choice" || question.type === "multi_choice";
   const isTf = question.type === "true_false";
   const isBlank = question.type === "fill_blank";
+  const isConstructed = ["fill_blank", "application", "proof", "short_answer"].includes(question.type)
+    && Boolean(question.subparts?.length);
   const [content, setContent] = useState(question.content);
   const [options, setOptions] = useState<OptionDraft[]>(() => {
     const src = (question.options ?? []).map((o) => ({ key: o.key, text: o.text }));
@@ -66,6 +93,11 @@ export function QuestionEditDialog({ question, busy, error, onClose, onSave }: P
   });
   const [answerKeys, setAnswerKeys] = useState<string[]>(() => [...(question.answer?.keys ?? [])]);
   const [answerTexts, setAnswerTexts] = useState(() => (question.answer?.texts ?? []).join("\n"));
+  const [subpartsText, setSubpartsText] = useState(() => JSON.stringify(question.subparts ?? [], null, 2));
+  const [structuredAnswerText, setStructuredAnswerText] = useState(() =>
+    JSON.stringify(question.answer?.subparts ?? [], null, 2)
+  );
+  const [sourcesText, setSourcesText] = useState(() => JSON.stringify(question.external_sources ?? [], null, 2));
   const [explanation, setExplanation] = useState(question.explanation ?? "");
   const [localError, setLocalError] = useState("");
 
@@ -107,6 +139,50 @@ export function QuestionEditDialog({ question, busy, error, onClose, onSave }: P
     const stem = content.trim();
     if (!stem) {
       setLocalError("题干不能为空");
+      return;
+    }
+    if (isConstructed) {
+      try {
+        const rawParts = parseArray(subpartsText, "小问与评分量规");
+        const rawAnswers = parseArray(structuredAnswerText, "正解要点");
+        const rawSources = parseArray(sourcesText, "外部参考来源");
+        const subparts = rawParts.map((part) => {
+          if (!isRecord(part) || typeof part.id !== "string" || typeof part.prompt !== "string") {
+            throw new Error("每个小问都需要 id 和 prompt");
+          }
+          return {
+            id: part.id,
+            prompt: part.prompt,
+            ...(part.rubric ? { rubric: part.rubric } : {}),
+          };
+        });
+        const answerParts = rawAnswers.map((part) => {
+          if (!isRecord(part) || typeof part.id !== "string") {
+            throw new Error("每个正解都需要对应的小问 id");
+          }
+          return {
+            id: part.id,
+            ...(strings(part.texts).length > 0 ? { texts: strings(part.texts) } : {}),
+            ...(strings(part.expected_points).length > 0
+              ? { expected_points: strings(part.expected_points) }
+              : {}),
+          };
+        });
+        if (subparts.length === 0 || answerParts.length !== subparts.length) {
+          throw new Error("小问与正解数量必须一致且不能为空");
+        }
+        setLocalError("");
+        onSave({
+          content: stem,
+          options: null,
+          answer: { subparts: answerParts },
+          explanation: explanation.trim(),
+          subparts,
+          external_sources: rawSources,
+        });
+      } catch (parseError) {
+        setLocalError(parseError instanceof Error ? parseError.message : "题目结构格式不正确");
+      }
       return;
     }
     if (isBlank) {
@@ -177,7 +253,34 @@ export function QuestionEditDialog({ question, busy, error, onClose, onSave }: P
             />
           </label>
 
-          {isBlank ? (
+          {isConstructed ? (
+            <div className="space-y-3">
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-slate-700">小问与评分量规（JSON）</span>
+                <textarea
+                  className="input min-h-40 font-mono text-xs"
+                  value={subpartsText}
+                  onChange={(e) => setSubpartsText(e.target.value)}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-slate-700">正解要点（JSON）</span>
+                <textarea
+                  className="input min-h-32 font-mono text-xs"
+                  value={structuredAnswerText}
+                  onChange={(e) => setStructuredAnswerText(e.target.value)}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-slate-700">外部参考来源（JSON）</span>
+                <textarea
+                  className="input min-h-24 font-mono text-xs"
+                  value={sourcesText}
+                  onChange={(e) => setSourcesText(e.target.value)}
+                />
+              </label>
+            </div>
+          ) : isBlank ? (
             <label className="block space-y-1.5">
               <span className="text-sm font-medium text-slate-700">正确答案</span>
               <textarea

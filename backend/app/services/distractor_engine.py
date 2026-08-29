@@ -203,9 +203,15 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
             {"错" if correct else "对": "与材料陈述相反或偷换条件"},
             chunk_id,
         )
-    if qtype == "fill_blank":
-        texts = stem_payload.get("answer", {}).get("texts") or [answer]
-        return _pack(stem_payload, None, {"texts": texts}, None, chunk_id)
+    if qtype in {"fill_blank", "application", "proof", "short_answer"}:
+        structured_answer = dict(stem_payload.get("answer") or {})
+        if qtype == "fill_blank" and not structured_answer.get("texts"):
+            structured_answer["texts"] = [
+                text
+                for part in structured_answer.get("subparts") or []
+                for text in (part.get("texts") or [])
+            ] or [answer]
+        return _pack(stem_payload, None, structured_answer, None, chunk_id)
 
     cands = await overgenerate(stem, answer, passage)
     filtered = filter_candidates(cands, answer=answer, stem=stem, passage=passage)
@@ -286,10 +292,13 @@ def _pack(
         "knowledge_tags": stem_payload.get("knowledge_tags") or [],
         "micro_skill": stem_payload.get("micro_skill", "detail"),
         "cognitive_level": stem_payload.get("cognitive_level", "remember"),
+        "subparts": stem_payload.get("subparts"),
         "source_span": {
             "chunk_id": chunk_id,
             "quote": stem_payload.get("source_quote") or "",
         },
+        "external_source_ids": stem_payload.get("external_source_ids") or [],
+        "target_difficulty": stem_payload.get("target_difficulty"),
         "source_chunk_id": chunk_id,
         "needs_review": bool(needs_review or stem_payload.get("needs_review")),
         "quality_scores": {},

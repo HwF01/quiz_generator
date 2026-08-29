@@ -8,6 +8,7 @@ from app.services.quality_gates import (
     unique_correct,
 )
 from app.services.knowledge_tracing import update_mastery, recommend_difficulty
+from app.services.subjective_grading import rubric_valid
 
 
 def test_answer_exists_and_leak():
@@ -58,6 +59,30 @@ def test_choice_structure_requires_four_distinct_options_and_one_key():
     assert choice_structure_valid(question)
     question["options"][3]["text"] = "线粒体"
     assert not choice_structure_valid(question)
+
+
+def test_constructed_question_requires_matching_subparts_and_rubric():
+    question = {
+        "type": "proof",
+        "content": "证明命题。",
+        "answer": {"subparts": [{"id": "p1", "expected_points": ["使用定义"]}]},
+        "subparts": [
+            {
+                "id": "p1",
+                "prompt": "给出证明。",
+                "rubric": {
+                    "max_score": 5,
+                    "criteria": [{"description": "使用定义", "points": 5}],
+                },
+            }
+        ],
+        "source_span": {"quote": "定义如下。"},
+    }
+    assert answer_exists(question, "定义如下。")
+    assert choice_structure_valid(question)
+    assert rubric_valid(question["subparts"])
+    question["subparts"][0]["rubric"]["criteria"][0]["points"] = 4
+    assert not rubric_valid(question["subparts"])
 
 
 @pytest.mark.asyncio

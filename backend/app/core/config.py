@@ -64,12 +64,14 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     embedding_provider: str = "local"
     embedding_model: str = "hashed-bigram"
+    tavily_api_key: str = ""
+    tavily_max_results: int = 5
 
     mock_llm: bool = False
     enable_ocr: bool = True
     max_upload_mb: int = 20
-    max_key_sentences: int = 30
-    max_questions: int = 40
+    max_key_sentences: int = 50
+    max_questions: int = 50
 
     @property
     def is_local_stack(self) -> bool:
@@ -100,6 +102,10 @@ class Settings(BaseSettings):
                 self.openai_api_key,
             ]
         )
+
+    @property
+    def web_search_available(self) -> bool:
+        return bool(self.tavily_api_key)
 
     @property
     def use_mock_llm(self) -> bool:

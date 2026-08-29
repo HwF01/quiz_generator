@@ -176,11 +176,14 @@ def _mock_json(blob: str) -> dict:
     if "判断科目" in blob or ("confidence" in low and "civics" in low):
         if any(k in blob for k in ["Python", "代码", "算法", "函数", "API", "HTTP"]):
             sub = "it"
+            tags = ["engineering", "it"]
         elif any(k in blob for k in ["历史", "朝代", "革命"]):
             sub = "history"
+            tags = ["humanities"]
         else:
             sub = "general"
-        return {"subject": sub, "confidence": 0.7, "reason": "关键词匹配"}
+            tags = []
+        return {"subject": sub, "subject_tags": tags, "confidence": 0.7, "reason": "关键词匹配"}
     if "answer_type" in low or "预置答案锚点" in blob and "不要输出完整选择题" in blob:
         items = []
         for s in sentences[:3]:
@@ -194,12 +197,51 @@ def _mock_json(blob: str) -> dict:
                 }
             )
         return {"items": items or [{"quote": quote, "answer": answer, "answer_type": "claim", "knowledge_tags": ["要点"], "suggested_micro_skill": "gist"}]}
+    if "学习者作答" in blob and "overall_feedback" in low:
+        match = re.search(r"小问与量规：(\[.*?\])\n正解：", blob, re.S)
+        try:
+            subparts = json.loads(match.group(1)) if match else []
+        except json.JSONDecodeError:
+            subparts = []
+        return {
+            "status": "graded",
+            "subparts": [
+                {
+                    "id": str(part.get("id") or "p1"),
+                    "score": (part.get("rubric") or {}).get("max_score", 1),
+                    "evidence": "作答满足量规要求。",
+                    "feedback": "答案要点完整。",
+                }
+                for part in subparts
+                if isinstance(part, dict)
+            ],
+            "overall_feedback": "已按量规完成辅助批改。",
+        }
+    if "量规可供人工审校" in blob and "rubrics" in low:
+        match = re.search(r"小问：(\[.*?\])\n正解：", blob, re.S)
+        try:
+            subparts = json.loads(match.group(1)) if match else []
+        except json.JSONDecodeError:
+            subparts = []
+        return {
+            "valid": True,
+            "rubrics": [
+                {
+                    "id": str(part.get("id") or "p1"),
+                    "max_score": 5,
+                    "criteria": [{"description": "回答正确要点", "points": 5}],
+                }
+                for part in subparts
+                if isinstance(part, dict)
+            ],
+            "comment": "量规可供人工审校",
+        }
     if "不要输出干扰项" in blob or "correct_text" in low:
-        qtype = "single_choice"
-        if "true_false" in blob:
-            qtype = "true_false"
-        if "fill_blank" in blob:
-            qtype = "fill_blank"
+        type_match = re.search(
+            r"题型：(single_choice|true_false|fill_blank|application|proof|short_answer)",
+            blob,
+        )
+        qtype = type_match.group(1) if type_match else "single_choice"
         payload = {
             "stem": f"根据材料，下列关于「{answer}」的说法正确的是？",
             "type": qtype,
@@ -217,7 +259,14 @@ def _mock_json(blob: str) -> dict:
             payload["correct_text"] = "对"
         if qtype == "fill_blank":
             payload["stem"] = quote.replace(answer, "______") if answer in quote else "材料中的关键结论是______。"
-            payload["answer"] = {"keys": [], "texts": [answer]}
+        if qtype in {"fill_blank", "application", "proof", "short_answer"}:
+            prompt = "填写空缺内容" if qtype == "fill_blank" else "说明你的推导或结论"
+            expected = {"id": "p1", "texts": [answer]}
+            if qtype != "fill_blank":
+                expected = {"id": "p1", "expected_points": [answer]}
+            payload["stem"] = payload["stem"] if qtype == "fill_blank" else f"根据材料：{quote}"
+            payload["subparts"] = [{"id": "p1", "prompt": prompt}]
+            payload["answer"] = {"subparts": [expected]}
         return payload
     if "equivalent_to_answer" in low and "verdict" in low:
         match = re.search(r"候选：(\[.*?\])\n【待考查文本开始】", blob, re.S)
