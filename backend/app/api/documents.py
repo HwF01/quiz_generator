@@ -15,11 +15,11 @@ from app.services.storage import upload_bytes
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 ALLOWED = {
-    "application/pdf": ".pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-    "text/plain": ".txt",
-    "text/markdown": ".md",
+    "application/pdf": {".pdf"},
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": {".pptx"},
+    "text/plain": {".txt", ".md"},
+    "text/markdown": {".md"},
 }
 
 
@@ -34,12 +34,13 @@ async def upload(
         raise AppError(f"文件不能超过 {settings.max_upload_mb}MB")
     name = file.filename or "upload.bin"
     ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    if ext not in set(ALLOWED.values()):
-        raise AppError("仅支持 PDF / Word / PPT / TXT")
+    allowed_exts = {allowed for exts in ALLOWED.values() for allowed in exts}
+    if ext not in allowed_exts:
+        raise AppError("仅支持 PDF / Word / PPT / TXT / Markdown（.md）")
     ctype = (file.content_type or "").split(";")[0].strip().lower()
     if ctype not in ALLOWED:
         raise AppError("文件类型不被支持")
-    if ALLOWED[ctype] != ext:
+    if ext not in ALLOWED[ctype]:
         raise AppError("文件扩展名与类型不一致")
     key = f"{user.id}/{uuid4()}{ext}"
     try:

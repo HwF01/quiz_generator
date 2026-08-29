@@ -16,7 +16,7 @@ async def classify_subject(text: str, hint: str = "auto") -> str:
     raw = await complete_json(
         provider,
         prompt,
-        f"文档片段：\n{text[:3000]}",
+        f"【待考查文本开始】\n{text[:3000]}\n【待考查文本结束】",
         temperature=0.2,
     )
     try:

@@ -15,6 +15,17 @@ type Job = {
   models_used?: Record<string, string>;
 };
 
+async function fetchQuizTitles(): Promise<string[]> {
+  const list = await api<{ id: string; title: string }[]>("/quizzes");
+  return list.map((q) => q.title);
+}
+
+async function uploadDocument(uploadFile: File): Promise<{ id: string }> {
+  const fd = new FormData();
+  fd.append("file", uploadFile);
+  return api<{ id: string }>("/documents/upload", { method: "POST", body: fd });
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -29,18 +40,21 @@ export default function UploadPage() {
   const [force, setForce] = useState(false);
   const [dupPrompt, setDupPrompt] = useState<{ requested: string; resolved: string } | null>(null);
   const titleTouchedRef = useRef(false);
+  const titlesCacheRef = useRef<string[] | null>(null);
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
   }, [router]);
 
   useEffect(() => {
-    api<{ id: string; title: string }[]>("/quizzes")
-      .then((list) => {
-        const computedDefault = nextUnnamedTitle(list.map((q) => q.title));
-        if (!titleTouchedRef.current) setTitle(computedDefault);
+    fetchQuizTitles()
+      .then((titles) => {
+        titlesCacheRef.current = titles;
+        if (!titleTouchedRef.current) setTitle(nextUnnamedTitle(titles));
       })
-      .catch(() => {});
+      .catch(() => {
+        titlesCacheRef.current = titlesCacheRef.current ?? [];
+      });
   }, []);
 
   useEffect(() => {
@@ -59,14 +73,11 @@ export default function UploadPage() {
     return () => clearInterval(t);
   }, [job, router]);
 
-  async function submitGenerate(uploadFile: File, finalTitle: string) {
-    const fd = new FormData();
-    fd.append("file", uploadFile);
-    const doc = await api<{ id: string }>("/documents/upload", { method: "POST", body: fd });
+  async function requestGenerate(documentId: string, finalTitle: string) {
     const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
       method: "POST",
       body: JSON.stringify({
-        document_id: doc.id,
+        document_id: documentId,
         title: finalTitle,
         category,
         subject,
@@ -83,28 +94,38 @@ export default function UploadPage() {
     setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
   }
 
+  async function submitGenerate(uploadFile: File, finalTitle: string) {
+    const doc = await uploadDocument(uploadFile);
+    await requestGenerate(doc.id, finalTitle);
+  }
+
   async function start() {
     if (!file) return;
     setErr("");
     setBusy(true);
     try {
-      let existingTitles: string[] = [];
-      try {
-        const list = await api<{ id: string; title: string }[]>("/quizzes");
-        existingTitles = list.map((q) => q.title);
-      } catch {
-        existingTitles = [];
-      }
       const trimmed = title.trim();
-      let finalTitle = trimmed;
-      if (!titleTouchedRef.current || isUnnamedTitle(trimmed)) {
-        finalTitle = nextUnnamedTitle(existingTitles);
-      } else if (existingTitles.includes(trimmed)) {
-        finalTitle = withDuplicateSuffix(trimmed, existingTitles);
-        setDupPrompt({ requested: trimmed, resolved: finalTitle });
+      const autoTitle = !titleTouchedRef.current || isUnnamedTitle(trimmed);
+      const titlesPromise = fetchQuizTitles()
+        .then((titles) => {
+          titlesCacheRef.current = titles;
+          return titles;
+        })
+        .catch(() => titlesCacheRef.current ?? []);
+
+      if (autoTitle) {
+        const [existingTitles, doc] = await Promise.all([titlesPromise, uploadDocument(file)]);
+        await requestGenerate(doc.id, nextUnnamedTitle(existingTitles));
         return;
       }
-      await submitGenerate(file, finalTitle);
+
+      const existingTitles = titlesCacheRef.current ?? (await titlesPromise);
+      if (existingTitles.includes(trimmed)) {
+        setDupPrompt({ requested: trimmed, resolved: withDuplicateSuffix(trimmed, existingTitles) });
+        return;
+      }
+      const doc = await uploadDocument(file);
+      await requestGenerate(doc.id, trimmed);
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "上传失败");
     } finally {
@@ -131,7 +152,7 @@ export default function UploadPage() {
     <div className="grid gap-6 md:grid-cols-2">
       <div className="card space-y-4 p-4 sm:p-6">
         <h1 className="text-xl font-semibold">上传文档出题</h1>
-        <p className="text-sm text-slate-500">支持 PDF / Word / PPT，最大 20MB。扫描件将尝试 OCR。</p>
+        <p className="text-sm text-slate-500">支持 PDF / Word / PPT / TXT / Markdown，最大 20MB。扫描件将尝试 OCR。</p>
         <input
           type="file"
           accept=".pdf,.docx,.pptx,.txt,.md"

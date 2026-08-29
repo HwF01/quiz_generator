@@ -22,7 +22,7 @@ from app.models.quiz_set import QuizSet
 from app.models.user import User
 from app.schemas.quiz import GenerateQuizIn, QuestionUpdateIn, QuizUpdateIn, RatingIn
 from app.services.distractor_engine import build_choice_question
-from app.services.quality_gates import apply_gates
+from app.services.quality_gates import apply_gates, choice_structure_valid
 from app.services.quota import assert_quota, incr_quota
 from app.services.quiz_title import uniquify_title
 
@@ -69,6 +69,17 @@ async def _discard_quiz(db: AsyncSession, quiz: QuizSet, job: GenerationJob | No
             linked.quiz_set_id = None
     quiz.generation_job_id = None
     await db.delete(quiz)
+
+
+def _source_passage(doc: Document | None, question: Question) -> str:
+    mapped = (doc.passage_map if doc else None) or []
+    if isinstance(mapped, list):
+        for item in mapped:
+            if isinstance(item, dict) and item.get("chunk_id") == question.source_chunk_id:
+                text = str(item.get("text") or "").strip()
+                if text:
+                    return text
+    return str((doc.extracted_text if doc else "") or (question.source_span or {}).get("quote") or question.content)
 
 
 def _quiz_out(quiz: QuizSet, extra: dict | None = None) -> dict:
@@ -208,6 +219,12 @@ async def get_quiz(
         select(Question).where(Question.quiz_set_id == quiz.id).order_by(Question.created_at)
     )
     questions = [_q_out(q) for q in qrows.scalars().all()]
+    if purpose == "practice":
+        questions = [
+            q
+            for q in questions
+            if not q["needs_review"] and choice_structure_valid(q)
+        ]
     fav_ids: set[str] = set()
     if user and questions:
         fav_rows = await db.execute(
@@ -249,6 +266,14 @@ async def patch_quiz(
     if body.category is not None:
         quiz.category = body.category
     if body.visibility is not None:
+        if body.visibility == "public":
+            pending = await db.scalar(
+                select(Question.id)
+                .where(Question.quiz_set_id == quiz.id, Question.needs_review.is_(True))
+                .limit(1)
+            )
+            if pending:
+                raise AppError("题库仍有待审校题目，完成审校后才能公开", code=400)
         quiz.visibility = body.visibility
         quiz.is_public = body.visibility == "public"
     await db.commit()
@@ -286,10 +311,26 @@ async def patch_question(
         raise AppError("无权修改", code=403, status_code=403)
     if quiz.is_builtin:
         raise AppError("内置题库不可修改", code=403, status_code=403)
+    candidate = {
+        "type": q.type,
+        "options": body.options if body.options is not None else q.options,
+        "answer": body.answer if body.answer is not None else q.answer,
+    }
+    structure_ok = choice_structure_valid(candidate)
+    if body.needs_review is False and not structure_ok:
+        raise AppError("请先补全 4 个不同选项并指定唯一正解，再标记已审", code=400)
     for field in ("content", "options", "answer", "explanation", "needs_review"):
         val = getattr(body, field)
         if val is not None:
             setattr(q, field, val)
+    if not structure_ok:
+        scores = q.quality_scores or {}
+        reasons = list(scores.get("review_reasons") or [])
+        if "invalid_choice_structure" not in reasons:
+            reasons.append("invalid_choice_structure")
+        scores["review_reasons"] = reasons
+        q.quality_scores = scores
+        q.needs_review = True
     await db.commit()
     return ok(_q_out(q))
 
@@ -356,7 +397,8 @@ async def harden_question(
     if quiz.is_builtin:
         raise AppError("内置题库不可修改", code=403, status_code=403)
     span = q.source_span or {}
-    passage = span.get("quote") or q.content
+    doc = await db.get(Document, quiz.document_id) if quiz.document_id else None
+    passage = _source_passage(doc, q)
     stem = {
         "stem": q.content,
         "type": q.type,

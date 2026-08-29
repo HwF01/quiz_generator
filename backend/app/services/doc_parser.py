@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 
 from app.core.config import settings
@@ -17,6 +18,107 @@ class ParseResult:
 def _clean(text: str) -> str:
     lines = [ln.strip() for ln in text.splitlines()]
     return "\n".join(ln for ln in lines if ln)
+
+
+def _strip_markdown_front_matter(text: str) -> str:
+    if not text.startswith("---"):
+        return text
+    match = re.match(r"^---\s*\r?\n.*?\r?\n---\s*(?:\r?\n|$)", text, flags=re.DOTALL)
+    return text[match.end() :] if match else text
+
+
+def _inline_markdown_text(token) -> str:
+    parts: list[str] = []
+    for child in token.children or []:
+        if child.type in {"image", "html_inline"}:
+            continue
+        if child.type in {"softbreak", "hardbreak"}:
+            parts.append(" ")
+        elif child.type in {"text", "code_inline"}:
+            parts.append(child.content)
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+
+def parse_markdown(data: bytes) -> ParseResult:
+    try:
+        source = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return ParseResult(text="", error="Markdown 文件必须使用 UTF-8 编码")
+
+    from markdown_it import MarkdownIt
+
+    source = _strip_markdown_front_matter(source)
+    source = re.sub(r"<!--.*?-->", "", source, flags=re.DOTALL)
+    tokens = MarkdownIt("commonmark", {"html": False}).enable("table").parse(source)
+    blocks: list[str] = []
+    heading_path: list[str] = []
+    table_row: list[str] = []
+    in_table = False
+    in_quote = False
+    list_depth = 0
+    heading_level: int | None = None
+
+    for token in tokens:
+        if token.type in {"fence", "code_block", "html_block"}:
+            continue
+        if token.type == "heading_open":
+            heading_level = int(token.tag[1:])
+            continue
+        if token.type == "heading_close":
+            heading_level = None
+            continue
+        if token.type == "table_open":
+            in_table = True
+            blocks.append("[表格]")
+            continue
+        if token.type == "table_close":
+            in_table = False
+            continue
+        if token.type == "tr_open":
+            table_row = []
+            continue
+        if token.type == "tr_close":
+            if table_row:
+                blocks.append(" | ".join(table_row))
+            table_row = []
+            continue
+        if token.type == "blockquote_open":
+            in_quote = True
+            continue
+        if token.type == "blockquote_close":
+            in_quote = False
+            continue
+        if token.type in {"bullet_list_open", "ordered_list_open"}:
+            list_depth += 1
+            continue
+        if token.type in {"bullet_list_close", "ordered_list_close"}:
+            list_depth = max(list_depth - 1, 0)
+            continue
+        if token.type != "inline":
+            continue
+
+        text = _inline_markdown_text(token)
+        if not text:
+            continue
+        if heading_level is not None:
+            heading_path = heading_path[: heading_level - 1] + [text]
+            continue
+        if in_table:
+            table_row.append(text)
+            continue
+        prefix = ""
+        if heading_path:
+            prefix += f"【{' > '.join(heading_path)}】 "
+        if in_quote:
+            prefix += "引用："
+        if list_depth:
+            prefix += "• "
+        blocks.append(prefix + text)
+
+    text = "\n\n".join(blocks).strip()
+    if not text:
+        return ParseResult(text="", error="Markdown 文档中没有可用于出题的文本")
+    return ParseResult(text=text, pages=[text])
 
 
 def parse_pdf(data: bytes) -> ParseResult:
@@ -100,7 +202,9 @@ def parse_document(filename: str, data: bytes) -> ParseResult:
         return parse_docx(data)
     if name.endswith(".pptx"):
         return parse_pptx(data)
-    if name.endswith(".txt") or name.endswith(".md"):
+    if name.endswith(".md"):
+        return parse_markdown(data)
+    if name.endswith(".txt"):
         text = data.decode("utf-8", errors="ignore")
         return ParseResult(text=_clean(text), pages=[_clean(text)])
-    return ParseResult(text="", error="仅支持 PDF / Word / PPT / TXT")
+    return ParseResult(text="", error="仅支持 PDF / Word / PPT / TXT / Markdown（.md）")

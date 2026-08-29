@@ -7,6 +7,10 @@
 
 产品定位是 AI 辅助低风险命题（练习/草稿），不是高风险考试全自动出卷。
 
+对用户、计划、CONTEXT.md、ADR 与项目 skill 一律用中文。第三方 SKILL.md 保持上游英文，执行时仍遵循其步骤，不要翻译或 fork。
+
+不要把 Obra Superpowers 与 Matt Pocock 同时作为默认工作流；默认只按需调用 Matt Pocock（/grill-with-docs、/tdd 等）。不要整包装 Cloudflare / OpenAI Plugins / Anthropic 文档 skill。改前端时用 Vercel react-best-practices 与 web-design-guidelines，不要同时常开 Anthropic frontend-design。
+
 编码规范：
 - Python 使用 async/await 编写所有 I/O 操作
 - TypeScript 使用 strict mode，避免 any

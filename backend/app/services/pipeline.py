@@ -122,21 +122,16 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
                 key_items.append(it)
             if len(key_items) >= settings.max_key_sentences:
                 break
-        if not key_items:
-            for m in suitable[: blueprint.total_questions]:
-                key_items.append(
-                    {
-                        "quote": m["text"][:80],
-                        "answer": (m.get("summary") or m["text"])[:20],
-                        "chunk_id": m["chunk_id"],
-                        "passage": m["text"],
-                        "knowledge_tags": m.get("suggested_points") or [],
-                    }
-                )
-
-        n_source = len(key_items)
-        allocs = allocate(n_source, blueprint)
-        key_items = [key_items[i % n_source] for i in range(len(allocs))] if key_items and allocs else []
+        unique_items: list[dict] = []
+        seen_quotes: set[str] = set()
+        for item in key_items:
+            quote = "".join(str(item.get("quote") or "").split())
+            if quote and quote not in seen_quotes:
+                seen_quotes.add(quote)
+                unique_items.append(item)
+        target = min(blueprint.total_questions, settings.max_questions)
+        key_items = unique_items[:target]
+        allocs = allocate(len(key_items), blueprint)
         gen = generator_provider(subject)
         cri = critic_provider()
         job.models_used = {
@@ -148,20 +143,32 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         }
         await db.commit()
 
-        total = max(len(key_items), 1)
-        target = min(blueprint.total_questions, settings.max_questions)
+        total = len(key_items)
+        if not key_items:
+            raise RuntimeError("未能从材料中提取可溯源的考查内容，请补充更完整的教学文本")
 
-        async def _build_one(i: int, item: dict, alloc) -> dict:
+        async def _build_one(i: int, item: dict, alloc) -> dict | None:
             async with _GEN_SEM:
                 passage = item["passage"]
                 stem = await generate_stem(passage, item, alloc, subject)
+                if stem.get("_generation_error"):
+                    logger.warning("skip incomplete stem job=%s item=%s", job_id, i)
+                    return None
                 q = await build_choice_question(stem, passage, item["chunk_id"])
                 return await apply_gates(q, passage)
 
         built = await asyncio.gather(
             *[_build_one(i, item, alloc) for i, (item, alloc) in enumerate(zip(key_items, allocs))]
         )
-        questions = list(built)[:target]
+        questions = [q for q in built if q is not None][:target]
+        if not questions:
+            raise RuntimeError("未能生成可溯源题目，请补充更完整的教学文本后重试")
+        job.models_used = {
+            **(job.models_used or {}),
+            "requested_questions": str(target),
+            "generated_questions": str(len(questions)),
+            "skipped_questions": str(target - len(questions)),
+        }
         await set_progress(db, job, 85, f"出题完成 {len(questions)}/{total}")
 
         questions = enforce_detail_cap(questions, blueprint.max_detail_ratio)
@@ -193,9 +200,18 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         quiz.status = "ready"
         quiz.subject = subject
         quiz.blueprint = blueprint.model_dump()
+        if any(question.get("needs_review") for question in questions):
+            quiz.visibility = "private"
+            quiz.is_public = False
         await remember_doc_quiz(doc.content_hash, quiz.id)
         await db.commit()
-        await set_progress(db, job, 100, "完成", "succeeded")
+        await set_progress(
+            db,
+            job,
+            100,
+            f"完成：生成 {len(questions)}/{target} 题，跳过 {target - len(questions)} 题",
+            "succeeded",
+        )
     except Exception as exc:
         logger.exception("generation failed job=%s", job_id)
         job.error = str(exc)

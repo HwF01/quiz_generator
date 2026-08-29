@@ -219,6 +219,26 @@ def _mock_json(blob: str) -> dict:
             payload["stem"] = quote.replace(answer, "______") if answer in quote else "材料中的关键结论是______。"
             payload["answer"] = {"keys": [], "texts": [answer]}
         return payload
+    if "equivalent_to_answer" in low and "verdict" in low:
+        match = re.search(r"候选：(\[.*?\])\n【待考查文本开始】", blob, re.S)
+        material = re.search(r"【待考查文本开始】\n(.*?)\n【待考查文本结束】", blob, re.S)
+        try:
+            candidates = json.loads(match.group(1)) if match else []
+        except json.JSONDecodeError:
+            candidates = []
+        evidence = _first_sentences(material.group(1) if material else blob, 1)[0]
+        return {
+            "results": [
+                {
+                    "id": str(candidate.get("id")),
+                    "verdict": "accepted",
+                    "error_type": candidate.get("error_type") or "同维混淆",
+                    "evidence_quote": evidence,
+                    "reason": candidate.get("rationale") or "材料相关的错误选项",
+                }
+                for candidate in candidates
+            ]
+        }
     if "candidates" in low or "过生成" in blob or "干扰项候选" in blob:
         return {
             "candidates": [
@@ -245,6 +265,9 @@ def _mock_json(blob: str) -> dict:
             "leak": False,
             "controversial": False,
             "guessable": False,
+            "all_distractors_valid": True,
+            "invalid_distractor_keys": [],
+            "review_reasons": [],
             "comment": "可用于练习",
         }
     return {"ok": True, "summary": quote}

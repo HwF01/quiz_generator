@@ -23,9 +23,16 @@ frontend/out/
 # IDE
 .idea/
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
+!.cursor/rules/
+!.cursor/rules/**
 *.swp
 debug-*.log
+
+# Local markdown issue tracker (Matt Pocock setup)
+.scratch/
 
 # OS
 Thumbs.db

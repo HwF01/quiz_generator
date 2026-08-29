@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import re
+
 from app.services.llm.embed import similarity
 from app.services.jsonutil import parse_json
 from app.services.llm.router import complete_json, critic_provider
@@ -11,6 +14,24 @@ PAIR_SIM_TH = 0.9
 CONTEXT_SIM_TH = 0.12
 TF_TRUE = {"true", "t", "1", "yes", "正确", "对"}
 TF_FALSE = {"false", "f", "0", "no", "错误", "错"}
+GENERIC_DISTRACTOR_RE = re.compile(
+    r"相关但条件不同|同类的其他概念|另一处真实概念|前提条件|对立面|例外情况下|相关但错误",
+    re.IGNORECASE,
+)
+
+
+def _normalized(text: object) -> str:
+    return re.sub(r"[\s，。；、：“”‘’（）()【】\[\]「」]+", "", str(text or "")).lower()
+
+
+def _add_review_reason(question: dict, reason: str) -> None:
+    scores = question.get("quality_scores") or {}
+    reasons = list(scores.get("review_reasons") or [])
+    if reason not in reasons:
+        reasons.append(reason)
+    scores["review_reasons"] = reasons
+    question["quality_scores"] = scores
+    question["needs_review"] = True
 
 
 def is_tf_true(value: object) -> bool:
@@ -36,8 +57,11 @@ def filter_candidates(
     kept: list[dict] = []
     for cand in candidates:
         text = str(cand.get("text") or "").strip()
-        if not text or text == answer:
+        if not text or _normalized(text) == _normalized(answer):
             continue
+        if GENERIC_DISTRACTOR_RE.search(text):
+            continue
+        # 仅作字面近似去重；同义性由 Critic 的候选验伪裁定。
         if similarity(text, answer) >= ANSWER_SIM_TH:
             continue
         if similarity(text, stem + "\n" + passage[:400]) < CONTEXT_SIM_TH:
@@ -63,7 +87,57 @@ async def overgenerate(stem: str, answer: str, passage: str) -> list[dict]:
     return [c for c in cands if c.get("text")]
 
 
+async def validate_candidates(
+    candidates: list[dict],
+    *,
+    stem: str,
+    answer: str,
+    passage: str,
+) -> tuple[list[dict], bool]:
+    if not candidates:
+        return [], False
+    numbered = [{**cand, "id": str(i)} for i, cand in enumerate(candidates)]
+    provider = critic_provider()
+    prompt = load_prompt("validate_distractors")
+    user = (
+        f"题干：{stem}\n正确答案：{answer}\n候选：{json.dumps(numbered, ensure_ascii=False)}\n"
+        f"【待考查文本开始】\n{passage[:2500]}\n【待考查文本结束】"
+    )
+    try:
+        raw = await complete_json(provider, prompt, user, temperature=0.1)
+        data = parse_json(raw)
+    except Exception:
+        return [], True
+    results = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(results, list):
+        return [], True
+    verdicts = {
+        str(result.get("id")): result
+        for result in results
+        if isinstance(result, dict) and result.get("id") is not None
+    }
+    accepted: list[dict] = []
+    for candidate in numbered:
+        result = verdicts.get(candidate["id"]) or {}
+        if result.get("verdict") != "accepted":
+            continue
+        evidence = str(result.get("evidence_quote") or "").strip()
+        if not evidence or _normalized(evidence) not in _normalized(passage):
+            continue
+        accepted.append(
+            {
+                **candidate,
+                "rationale": str(result.get("reason") or candidate.get("rationale") or "材料相关的易错点"),
+                "error_type": str(result.get("error_type") or candidate.get("error_type") or "同维混淆"),
+                "evidence_quote": evidence,
+            }
+        )
+    return accepted, False
+
+
 async def adversarial_fix(question: dict, passage: str) -> dict:
+    if not question.get("options"):
+        return question
     provider = critic_provider()
     prompt = load_prompt("adversarial_review")
     user = (
@@ -74,25 +148,40 @@ async def adversarial_fix(question: dict, passage: str) -> dict:
         raw = await complete_json(provider, prompt, user, temperature=0.4)
         review = parse_json(raw)
     except Exception:
+        _add_review_reason(question, "critic_error")
         return question
     options = list(question.get("options") or [])
     replacements = review.get("replacements") or {}
+    candidates_by_key = {
+        str(key): {**value, "text": str(value.get("text") or "").strip()}
+        for key, value in replacements.items()
+        if isinstance(value, dict) and str(value.get("text") or "").strip()
+    }
+    validated, critic_error = await validate_candidates(
+        list(candidates_by_key.values()),
+        stem=str(question.get("content") or ""),
+        answer=str((question.get("answer") or {}).get("texts", [""])[0] or ""),
+        passage=passage,
+    )
+    if critic_error:
+        _add_review_reason(question, "critic_error")
+        return question
+    allowed = {_normalized(candidate["text"]): candidate for candidate in validated}
     for key in review.get("too_easy_keys") or []:
-        repl = replacements.get(key)
-        if not repl:
+        repl = candidates_by_key.get(str(key))
+        if not repl or _normalized(repl["text"]) not in allowed:
+            _add_review_reason(question, "adversarial_replacement_rejected")
             continue
         for opt in options:
             if opt.get("key") == key:
-                opt["text"] = repl.get("text") or opt["text"]
+                accepted = allowed[_normalized(repl["text"])]
+                opt["text"] = accepted["text"]
                 rationale = question.get("distractor_rationale") or {}
-                rationale[key] = repl.get("rationale") or rationale.get(key)
+                rationale[key] = accepted.get("rationale") or rationale.get(key)
                 question["distractor_rationale"] = rationale
     question["options"] = options
     if review.get("guessable"):
-        scores = question.get("quality_scores") or {}
-        scores["guessable"] = True
-        question["quality_scores"] = scores
-        question["needs_review"] = True
+        _add_review_reason(question, "guessable")
     return question
 
 
@@ -120,22 +209,34 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
 
     cands = await overgenerate(stem, answer, passage)
     filtered = filter_candidates(cands, answer=answer, stem=stem, passage=passage)
-    if len(filtered) < 3:
+    validated, critic_error = await validate_candidates(
+        filtered, stem=stem, answer=answer, passage=passage
+    )
+    if len(validated) < 3 and not critic_error:
         extra = await overgenerate(stem, answer, passage)
-        filtered = filter_candidates(filtered + extra, answer=answer, stem=stem, passage=passage)
-    ranked = rank_candidates(filtered, answer=answer, stem=stem, passage=passage)[:3]
-    used_placeholder = False
-    while len(ranked) < 3:
-        used_placeholder = True
-        ranked.append(
-            {
-                "text": f"与「{answer}」相关但条件不同的表述",
-                "error_type": "同维混淆",
-                "rationale": "同类概念，适用条件不同",
-            }
+        filtered = filter_candidates(
+            filtered + extra, answer=answer, stem=stem, passage=passage
         )
+        validated, retry_critic_error = await validate_candidates(
+            filtered, stem=stem, answer=answer, passage=passage
+        )
+        critic_error = retry_critic_error
+    ranked = rank_candidates(validated, answer=answer, stem=stem, passage=passage)[:3]
+    if len(ranked) < 3:
+        draft = _pack(
+            stem_payload,
+            None,
+            {"texts": [answer]},
+            None,
+            chunk_id,
+            needs_review=True,
+        )
+        _add_review_reason(
+            draft, "critic_error" if critic_error else "distractors_insufficient"
+        )
+        return draft
+
     letters = ["A", "B", "C", "D"]
-    correct_idx = 0
     options = [{"key": "A", "text": answer}]
     rationale = {}
     for i, cand in enumerate(ranked[:3]):
@@ -149,7 +250,6 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
         opt["key"] = letters[i]
     correct_key = letters[(0 - rotate) % 4]
     remapped = {}
-    old_keys = ["A", "B", "C", "D"]
     # rationale keys were B C D before rotate; remap approximately by text
     text_to_reason = {c["text"]: c.get("rationale") for c in ranked}
     for opt in options:
@@ -161,11 +261,8 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
         {"keys": [correct_key], "texts": [answer]},
         remapped,
         chunk_id,
-        needs_review=used_placeholder,
     )
     packed = await adversarial_fix(packed, passage)
-    if used_placeholder:
-        packed["needs_review"] = True
     return packed
 
 

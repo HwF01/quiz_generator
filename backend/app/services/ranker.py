@@ -28,4 +28,15 @@ def rank_candidates(
             score -= 1
         scored.append((score, cand))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [c for _, c in scored]
+    ranked = [c for _, c in scored]
+    diverse: list[dict] = []
+    seen_error_types: set[str] = set()
+    for candidate in ranked:
+        error_type = str(candidate.get("error_type") or "")
+        if error_type and error_type in seen_error_types:
+            continue
+        diverse.append(candidate)
+        if error_type:
+            seen_error_types.add(error_type)
+    diverse.extend(candidate for candidate in ranked if candidate not in diverse)
+    return diverse
