@@ -159,9 +159,15 @@ def _first_sentences(text: str, n: int = 6) -> list[str]:
     return out[:n] or [text[:40] or "示例知识点"]
 
 
+def _exam_text(blob: str) -> str:
+    match = re.search(r"【待考查文本开始】\n(.*)\n【待考查文本结束】", blob, re.S)
+    return match.group(1) if match else blob
+
+
 def _mock_json(blob: str) -> dict:
     low = blob.lower()
-    sentences = _first_sentences(blob)
+    source = _exam_text(blob)
+    sentences = _first_sentences(source)
     quote = sentences[0]
     answer = quote[-12:] if len(quote) > 12 else quote
     if "suggested_points" in low or ("unsuitable" in low and "suggested_types" in low):
@@ -174,10 +180,10 @@ def _mock_json(blob: str) -> dict:
             "summary": quote[:60],
         }
     if "判断科目" in blob or ("confidence" in low and "civics" in low):
-        if any(k in blob for k in ["Python", "代码", "算法", "函数", "API", "HTTP"]):
+        if any(k in source for k in ["Python", "代码", "算法", "函数", "API", "HTTP"]):
             sub = "it"
             tags = ["engineering", "it"]
-        elif any(k in blob for k in ["历史", "朝代", "革命"]):
+        elif any(k in source for k in ["历史", "朝代", "革命"]):
             sub = "history"
             tags = ["humanities"]
         else:
@@ -192,11 +198,11 @@ def _mock_json(blob: str) -> dict:
                     "quote": s,
                     "answer": s[-10:] if len(s) > 10 else s,
                     "answer_type": "claim",
-                    "knowledge_tags": ["材料要点"],
+                    "knowledge_tags": [s[:16]],
                     "suggested_micro_skill": "detail",
                 }
             )
-        return {"items": items or [{"quote": quote, "answer": answer, "answer_type": "claim", "knowledge_tags": ["要点"], "suggested_micro_skill": "gist"}]}
+        return {"items": items or [{"quote": quote, "answer": answer, "answer_type": "claim", "knowledge_tags": [quote[:16]], "suggested_micro_skill": "gist"}]}
     if "学习者作答" in blob and "overall_feedback" in low:
         match = re.search(r"小问与量规：(\[.*?\])\n正解：", blob, re.S)
         try:
@@ -267,6 +273,23 @@ def _mock_json(blob: str) -> dict:
             payload["stem"] = payload["stem"] if qtype == "fill_blank" else f"根据材料：{quote}"
             payload["subparts"] = [{"id": "p1", "prompt": prompt}]
             payload["answer"] = {"subparts": [expected]}
+        if "【外部参考资料开始】" in blob:
+            src_match = re.search(
+                r"【外部参考资料开始】\n(.*)\n【外部参考资料结束】",
+                blob,
+                re.S,
+            )
+            if src_match:
+                try:
+                    sources = json.loads(src_match.group(1))
+                except json.JSONDecodeError:
+                    sources = []
+                if isinstance(sources, list):
+                    payload["external_source_ids"] = [
+                        str(source.get("id"))
+                        for source in sources
+                        if isinstance(source, dict) and source.get("id")
+                    ][:3]
         return payload
     if "equivalent_to_answer" in low and "verdict" in low:
         match = re.search(r"候选：(\[.*?\])\n【待考查文本开始】", blob, re.S)

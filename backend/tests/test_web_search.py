@@ -3,7 +3,44 @@ import pytest
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.services.cache import remember_doc_quiz, similar_doc_quiz
+from app.services.llm.providers import _mock_json
 from app.services.web_search import search_related_knowledge, topic_queries
+
+
+def test_mock_classify_uses_exam_text_not_prompt():
+    blob = (
+        "判断科目\n从以下类别中选一个 subject：civics, history, it\n"
+        "IT、编程、软件工程；人文社科、历史、政治\nconfidence civics\n"
+        "【待考查文本开始】\n光合作用是绿色植物利用光能的过程。\n【待考查文本结束】\n"
+    )
+    data = _mock_json(blob)
+    assert data["subject"] == "general"
+
+
+def test_mock_extract_quotes_come_from_exam_text():
+    passage = "光合作用是绿色植物利用光能的过程。叶绿体是光反应的主要场所。"
+    blob = (
+        "从适切的文本中抽取 1-3 个关键句\n"
+        "answer_type\n不要输出完整选择题\n"
+        f"【待考查文本开始】\n{passage}\n【待考查文本结束】\n"
+    )
+    data = _mock_json(blob)
+    quotes = [item["quote"] for item in data["items"]]
+    assert quotes
+    assert all(quote in passage for quote in quotes)
+    assert any("光合" in tag for item in data["items"] for tag in item["knowledge_tags"])
+
+
+def test_mock_stem_cites_external_sources():
+    blob = (
+        "不要输出干扰项\n题型：single_choice\n"
+        "【待考查文本开始】\n光合作用是绿色植物利用光能的过程。\n【待考查文本结束】\n"
+        "【外部参考资料开始】\n"
+        '[{"id": "web-abc123", "title": "光合", "url": "https://example.test"}]\n'
+        "【外部参考资料结束】\n"
+    )
+    data = _mock_json(blob)
+    assert data["external_source_ids"] == ["web-abc123"]
 
 
 def test_topic_queries_only_use_derived_tags():
