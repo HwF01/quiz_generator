@@ -1,0 +1,21 @@
+---
+description: FastAPI / SQLAlchemy 2 async 与统一 API 信封
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# 后端 Python
+
+- I/O 全部 `async`/`await`；同步阻塞用 `asyncio.to_thread`。
+- 对外响应用 `ok(...)` 或抛 `AppError`，形状是 `{code, data, message}`。
+
+```python
+# 错误
+raise AppError("该邮箱已注册")
+
+# 成功
+return ok({"id": quiz.id})
+```
+
+- LLM 只经 `app.services.llm`。长 prompt 只放 `prompts/*.md`。
+- 会话用 `SessionLocal` / `get_db`，不要新建同步 engine。

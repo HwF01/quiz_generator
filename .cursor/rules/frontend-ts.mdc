@@ -1,0 +1,25 @@
+---
+description: 前端 TypeScript strict，禁止 any
+globs: frontend/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# 前端 TypeScript
+
+`frontend/tsconfig.json` 已开 `strict`。不要用 `any`，用具体类型或 `unknown` 再收窄。
+
+```tsx
+// 错误
+function parse(body: any) {
+  return body.data;
+}
+
+// 正确
+type Envelope<T> = { code: number; data: T; message: string };
+
+function parse<T>(body: Envelope<T>): T {
+  return body.data;
+}
+```
+
+组件用函数组件 + hooks。`'use client'` 只在需要浏览器 API 时加。用户可见文案与视觉跟 `quizgen-ui-zh`。

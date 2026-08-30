@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "C:\\Users\\19124\\.local\\bin\\uvx.exe",
+      "args": ["--with", "mcp<2", "postgres-mcp", "--access-mode=restricted"],
+      "env": {
+        "DATABASE_URI": "postgresql://quiz:quiz@localhost:5432/quizgen"
+      }
+    }
+  }
+}

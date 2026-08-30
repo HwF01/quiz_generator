@@ -28,6 +28,7 @@ frontend/out/
 !.cursor/skills/**
 !.cursor/rules/
 !.cursor/rules/**
+!.cursor/mcp.json
 *.swp
 debug-*.log
 
