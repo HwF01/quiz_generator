@@ -10,7 +10,7 @@ class QuizRating(TimestampMixin, Base):
 
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     quiz_set_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("quiz_sets.id", ondelete="CASCADE")
+        String(36), ForeignKey("quiz_sets.id", ondelete="CASCADE"), index=True
     )
     score: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)

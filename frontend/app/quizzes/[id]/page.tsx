@@ -7,6 +7,7 @@ import { api, downloadAuth, getToken } from "@/lib/api";
 import { formatOptionLabel } from "@/lib/options";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
+import { ListSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel, quizStatusLabel } from "@/lib/labels";
 
 type Question = {
@@ -217,7 +218,7 @@ export default function QuizEditPage() {
         </div>
       );
     }
-    return <p className="text-sm text-slate-500">加载中…</p>;
+    return <ListSkeleton columns={false} cards={3} label="正在加载题库" />;
   }
 
   return (

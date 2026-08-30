@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuizFilterTabs } from "@/components/QuizFilterTabs";
+import { ListSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel } from "@/lib/labels";
 
 type Row = {
@@ -28,10 +29,15 @@ export default function FavoritesPage() {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [quizId, setQuizId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  async function load() {
-    const data = await api<Row[]>("/question-favorites");
-    setRows(data);
+  async function load(opts?: { silent?: boolean }) {
+    if (!opts?.silent) setLoading(true);
+    try {
+      setRows(await api<Row[]>("/question-favorites"));
+    } finally {
+      if (!opts?.silent) setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -44,14 +50,15 @@ export default function FavoritesPage() {
 
   async function toggleFav(questionId: string) {
     await api(`/quizzes/questions/${questionId}/favorite`, { method: "POST" });
-    await load();
+    await load({ silent: true });
   }
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">收藏</h1>
-      <QuizFilterTabs quizzes={quizzes} activeId={quizId} onSelect={setQuizId} />
-      {groups.map((g) => (
+      {loading ? <ListSkeleton columns={false} cards={3} label="正在加载收藏" /> : null}
+      {loading ? null : <QuizFilterTabs quizzes={quizzes} activeId={quizId} onSelect={setQuizId} />}
+      {!loading && groups.map((g) => (
         <section key={g.quiz.id} className="space-y-3">
           <h2 className="text-sm font-medium text-slate-600">
             <Link href={`/quizzes/${g.quiz.id}`} className="hover:text-brand-700 hover:underline">
@@ -86,7 +93,7 @@ export default function FavoritesPage() {
           ))}
         </section>
       ))}
-      {rows.length === 0 && <p className="text-sm text-slate-500">还没有收藏。做题或审校时可以收藏题目。</p>}
+      {!loading && rows.length === 0 && <p className="text-sm text-slate-500">还没有收藏。做题或审校时可以收藏题目。</p>}
     </div>
   );
 }

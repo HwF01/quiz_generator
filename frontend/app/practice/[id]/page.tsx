@@ -9,6 +9,7 @@ import { Star } from "lucide-react";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { PlayDetailCards, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CardSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel } from "@/lib/labels";
 
 type Question = {
@@ -269,7 +270,7 @@ export default function PracticePage() {
         </div>
       );
     }
-    return <p className="text-sm text-slate-500">加载中…</p>;
+    return <CardSkeleton lines={6} />;
   }
   if (!q) {
     return (

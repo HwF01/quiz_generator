@@ -195,13 +195,12 @@ async def my_favorites(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await db.execute(select(Favorite).where(Favorite.user_id == user.id))
-    out = []
-    for fav in rows.scalars().all():
-        quiz = await db.get(QuizSet, fav.quiz_set_id)
-        if quiz and quiz.status != "failed":
-            out.append(_quiz_out(quiz))
-    return ok(out)
+    rows = await db.execute(
+        select(QuizSet)
+        .join(Favorite, Favorite.quiz_set_id == QuizSet.id)
+        .where(Favorite.user_id == user.id, QuizSet.status != "failed")
+    )
+    return ok([_quiz_out(quiz) for quiz in rows.scalars().all()])
 
 
 @router.get("")

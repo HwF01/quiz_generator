@@ -56,6 +56,19 @@ async def test_seed_email_login_rejected(client: AsyncClient):
     assert res.json()["code"] == 401
 
 
+async def test_login_returns_token(client: AsyncClient):
+    await register(client, "login-ok@example.com")
+    res = await client.post(
+        "/api/auth/login",
+        json={"email": "login-ok@example.com", "password": "password12"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["code"] == 0
+    assert body["data"]["token"]
+    assert body["data"]["user"]["email"] == "login-ok@example.com"
+
+
 async def test_quota_exhausted_is_429(client: AsyncClient, fake_redis: FakeRedis):
     data = await register(client, "quota@example.com")
     me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {data['token']}"})
