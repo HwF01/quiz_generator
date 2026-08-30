@@ -13,7 +13,7 @@ export function FavoriteButton({ favorited, onToggle, className = "" }: Props) {
   return (
     <button
       type="button"
-      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white transition hover:bg-slate-50 active:bg-slate-100 ${className}`}
+      className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white transition hover:bg-slate-50 active:bg-slate-100 ${className}`}
       aria-label={favorited ? "取消收藏" : "收藏"}
       aria-pressed={favorited}
       onClick={onToggle}

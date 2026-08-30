@@ -1,17 +1,19 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, setToken } from "@/lib/api";
+import { safeNextPath } from "@/lib/labels";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setErr("");
     try {
@@ -20,7 +22,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       setToken(data.token);
-      router.push("/profile");
+      router.push(safeNextPath(searchParams.get("next")));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "登录失败");
     }
@@ -29,28 +31,42 @@ export default function LoginPage() {
   return (
     <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-6 sm:p-8">
       <h1 className="text-xl font-semibold">登录</h1>
-      <input
-        className="input"
-        type="email"
-        inputMode="email"
-        autoComplete="email"
-        placeholder="邮箱"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <input
-        className="input"
-        type="password"
-        autoComplete="current-password"
-        placeholder="密码"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium text-slate-700">邮箱</span>
+        <input
+          className="input"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          placeholder="邮箱地址"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </label>
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium text-slate-700">密码</span>
+        <input
+          className="input"
+          type="password"
+          autoComplete="current-password"
+          placeholder="请输入密码"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </label>
       {err && <p className="text-sm text-red-600">{err}</p>}
       <button className="btn-primary w-full">登录</button>
       <p className="text-sm text-slate-500">
         没有账号？ <Link href="/register" className="text-brand-700">注册</Link>
       </p>
     </form>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">加载中…</p>}>
+      <LoginForm />
+    </Suspense>
   );
 }

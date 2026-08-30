@@ -119,7 +119,7 @@ async def generate(
 ):
     await assert_quota(user.id, user.daily_gen_quota)
     if body.blueprint.enable_web_search and not settings.web_search_available:
-        raise AppError("管理员尚未配置联网检索服务", code=503, status_code=503)
+        raise AppError("未填写 Tavily Key，联网补充不可用；普通出题不受影响", code=503, status_code=503)
     if body.blueprint.allocation_mode == "manual":
         try:
             validate_type_counts(

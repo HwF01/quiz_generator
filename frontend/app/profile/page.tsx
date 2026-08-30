@@ -6,6 +6,7 @@ import { api, getToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { PlayDetailDialog, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { quizStatusLabel } from "@/lib/labels";
 
 type Quiz = {
   id: string;
@@ -128,7 +129,7 @@ export default function ProfilePage() {
             <Link key={q.id} href={`/quizzes/${q.id}`} className="card p-4 hover:border-brand-500 active:border-brand-500">
               <div className="flex items-start justify-between gap-2">
                 <strong className="min-w-0 break-words">{q.title}</strong>
-                <span className="badge shrink-0">{q.status}</span>
+                <span className="badge shrink-0">{quizStatusLabel(q.status)}</span>
               </div>
               <p className="mt-2 text-sm text-slate-500">
                 {q.category} · {q.question_count} 题 · {q.visibility === "public" ? "公开" : "私密"}
@@ -175,7 +176,7 @@ export default function ProfilePage() {
               </div>
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className="h-full rounded-full bg-brand-500"
+                  className="h-full rounded-full bg-brand-500 transition-[width] duration-500 ease-out"
                   style={{ width: `${Math.max(0, Math.min(100, p.score))}%` }}
                 />
               </div>
@@ -190,7 +191,7 @@ export default function ProfilePage() {
                 </button>
                 <button
                   type="button"
-                  className="btn-ghost text-red-600"
+                  className="btn-danger"
                   disabled={busyId === p.id}
                   onClick={() => requestRemovePlay(p.id)}
                 >

@@ -26,19 +26,32 @@ body {
   @apply btn border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100;
 }
 
+.btn-danger {
+  @apply btn border border-red-200 bg-white text-red-600 hover:bg-red-50 active:bg-red-100 disabled:opacity-50;
+}
+
 .input {
   @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base outline-none ring-brand-500 focus:ring-2 sm:text-sm;
+}
+
+.file-input {
+  @apply block w-full max-w-full text-sm text-slate-600;
+  @apply file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-xl file:border-0 file:bg-brand-600 file:px-4 file:text-sm file:font-medium file:text-white;
+  @apply hover:file:bg-brand-700 file:touch-manipulation;
 }
 
 .badge {
   @apply inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600;
 }
 
+.progress-fill {
+  @apply h-full rounded-full bg-brand-600 transition-[width] duration-500 ease-out;
+}
+
 .quiz-filter-tab {
   @apply inline-flex min-h-8 touch-manipulation items-center rounded-full px-3 py-1 text-sm font-medium text-slate-600;
-  @apply transition-[color,background-color,box-shadow,transform] duration-200 ease-out;
+  @apply transition-[color,background-color,box-shadow] duration-200 ease-out;
   @apply hover:bg-slate-100 hover:text-slate-800;
-  @apply active:scale-[0.97];
   @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40;
 }
 

@@ -58,7 +58,7 @@ def test_topic_queries_only_use_derived_tags():
 @pytest.mark.asyncio
 async def test_web_search_requires_configured_provider(monkeypatch):
     monkeypatch.setattr(settings, "tavily_api_key", "")
-    with pytest.raises(AppError, match="尚未配置"):
+    with pytest.raises(AppError, match="Tavily Key"):
         await search_related_knowledge(["math 极限"])
 
 

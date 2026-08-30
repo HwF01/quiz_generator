@@ -140,6 +140,39 @@ def default_config(existing: dict[str, str] | None = None) -> dict[str, str]:
     return values
 
 
+class WizardError(ValueError):
+    """User-facing first-run wizard validation error."""
+
+
+def apply_wizard_choices(
+    existing: dict[str, str],
+    *,
+    demo: bool,
+    qwen_key: str = "",
+    deepseek_key: str = "",
+    tavily_key: str = "",
+) -> dict[str, str]:
+    """Map first-run choices onto config.env values. Qwen and DeepSeek may both be set."""
+    values = default_config(existing)
+    qwen_key = qwen_key.strip()
+    deepseek_key = deepseek_key.strip()
+    tavily_key = tavily_key.strip()
+    if demo:
+        values["MOCK_LLM"] = "true"
+    else:
+        if not qwen_key and not deepseek_key:
+            raise WizardError("请至少填写通义千问或 DeepSeek 的 API Key，或改选演示模式。")
+        values["MOCK_LLM"] = "false"
+        if qwen_key:
+            values["QWEN_API_KEY"] = qwen_key
+        if deepseek_key:
+            values["DEEPSEEK_API_KEY"] = deepseek_key
+    if tavily_key:
+        values["TAVILY_API_KEY"] = tavily_key
+    values["SETUP_COMPLETE"] = "true"
+    return values
+
+
 def run_console_wizard(existing: dict[str, str]) -> dict[str, str] | None:
     """Configure portable builds when the embedded runtime has no tkinter."""
     if not sys.stdin or not sys.stdin.isatty():
@@ -150,28 +183,35 @@ def run_console_wizard(existing: dict[str, str]) -> dict[str, str] | None:
         )
         return None
 
-    values = default_config(existing)
     print(f"\n{APP_TITLE} — 首次设置")
-    print("1. 演示模式（无需 Key）")
-    print("2. 通义千问 Qwen")
-    print("3. DeepSeek")
+    print("通义千问与 DeepSeek 可同时填写：文科优先通义，理科优先 DeepSeek；只填一把则全部走这一把。")
+    print("Tavily 仅在「联网补充知识」时需要，可留空。")
+    print("1. 演示模式（无需出题 Key）")
+    print("2. 真实出题（填写通义千问和/或 DeepSeek）")
     while True:
         choice = input("请选择 [1]: ").strip() or "1"
-        if choice in {"1", "2", "3"}:
+        if choice in {"1", "2"}:
             break
-        print("请输入 1、2 或 3。")
+        print("请输入 1 或 2。")
 
-    if choice == "1":
-        values["MOCK_LLM"] = "true"
-    else:
-        key = input("API Key: ").strip()
-        if not key:
-            print("API Key 不能为空。")
-            return None
-        values["MOCK_LLM"] = "false"
-        values["QWEN_API_KEY" if choice == "2" else "DEEPSEEK_API_KEY"] = key
-    values["SETUP_COMPLETE"] = "true"
-    return values
+    demo = choice == "1"
+    qwen_key = ""
+    deepseek_key = ""
+    if not demo:
+        qwen_key = input("通义千问 API Key（可留空）：").strip()
+        deepseek_key = input("DeepSeek API Key（可留空）：").strip()
+    tavily_key = input("Tavily API Key（选填，可留空）：").strip()
+    try:
+        return apply_wizard_choices(
+            existing,
+            demo=demo,
+            qwen_key=qwen_key,
+            deepseek_key=deepseek_key,
+            tavily_key=tavily_key,
+        )
+    except WizardError as exc:
+        print(exc)
+        return None
 
 
 def message_box(text: str, title: str = APP_TITLE, error: bool = False) -> None:
@@ -198,10 +238,12 @@ def run_first_run_wizard(existing: dict[str, str]) -> dict[str, str] | None:
     root = tk.Tk()
     root.title(f"{APP_TITLE} — 首次设置")
     root.resizable(False, False)
-    root.geometry("460x320")
+    root.geometry("520x520")
 
     mode = tk.StringVar(value="demo")
-    key_var = tk.StringVar()
+    qwen_var = tk.StringVar()
+    deepseek_var = tk.StringVar()
+    tavily_var = tk.StringVar()
     cancelled = {"v": True}
 
     frame = ttk.Frame(root, padding=16)
@@ -209,35 +251,34 @@ def run_first_run_wizard(existing: dict[str, str]) -> dict[str, str] | None:
     ttk.Label(frame, text="选择出题方式", font=("Microsoft YaHei UI", 12, "bold")).pack(anchor="w")
     ttk.Label(
         frame,
-        text="演示模式不调用网络模型。真实出题需要你自己的 API Key，密钥只保存在本机。",
-        wraplength=420,
+        text="演示模式不调用网络模型。真实出题可同时填写通义千问与 DeepSeek（文科优先通义、理科优先 DeepSeek；只填一把则全部走这一把）。密钥只保存在本机。Tavily 选填，仅「联网补充知识」需要。",
+        wraplength=480,
     ).pack(anchor="w", pady=(4, 12))
 
-    for value, label in (
-        ("demo", "演示模式（无需 Key）"),
-        ("qwen", "通义千问 Qwen"),
-        ("deepseek", "DeepSeek"),
-    ):
-        ttk.Radiobutton(frame, text=label, variable=mode, value=value).pack(anchor="w")
+    ttk.Radiobutton(frame, text="演示模式（无需出题 Key）", variable=mode, value="demo").pack(anchor="w")
+    ttk.Radiobutton(frame, text="真实出题", variable=mode, value="live").pack(anchor="w")
 
-    ttk.Label(frame, text="API Key（演示模式可留空）").pack(anchor="w", pady=(12, 4))
-    ttk.Entry(frame, textvariable=key_var, show="*", width=48).pack(anchor="w", fill="x")
+    ttk.Label(frame, text="通义千问 API Key（可留空）").pack(anchor="w", pady=(12, 4))
+    ttk.Entry(frame, textvariable=qwen_var, show="*", width=48).pack(anchor="w", fill="x")
+    ttk.Label(frame, text="DeepSeek API Key（可留空）").pack(anchor="w", pady=(8, 4))
+    ttk.Entry(frame, textvariable=deepseek_var, show="*", width=48).pack(anchor="w", fill="x")
+    ttk.Label(frame, text="Tavily API Key（选填，可留空）").pack(anchor="w", pady=(8, 4))
+    ttk.Entry(frame, textvariable=tavily_var, show="*", width=48).pack(anchor="w", fill="x")
 
     def on_ok() -> None:
-        chosen = mode.get()
-        key = key_var.get().strip()
-        if chosen != "demo" and not key:
-            messagebox.showerror(APP_TITLE, "请填写 API Key，或改选演示模式。")
+        try:
+            applied = apply_wizard_choices(
+                existing,
+                demo=mode.get() == "demo",
+                qwen_key=qwen_var.get(),
+                deepseek_key=deepseek_var.get(),
+                tavily_key=tavily_var.get(),
+            )
+        except WizardError as exc:
+            messagebox.showerror(APP_TITLE, str(exc))
             return
-        if chosen == "demo":
-            values["MOCK_LLM"] = "true"
-        elif chosen == "qwen":
-            values["QWEN_API_KEY"] = key
-            values["MOCK_LLM"] = "false"
-        else:
-            values["DEEPSEEK_API_KEY"] = key
-            values["MOCK_LLM"] = "false"
-        values["SETUP_COMPLETE"] = "true"
+        values.clear()
+        values.update(applied)
         cancelled["v"] = False
         root.destroy()
 

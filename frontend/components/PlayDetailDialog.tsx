@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { formatOptionLabel } from "@/lib/options";
+import { microSkillLabel } from "@/lib/labels";
 
 export type PlayDetailItem = {
   question_id: string;
@@ -130,7 +131,7 @@ export function PlayDetailCards({
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
             <span className="badge">第 {idx + 1} 题</span>
             <span className="badge">{typeLabel(item.type)}</span>
-            {item.micro_skill && <span className="badge">{item.micro_skill}</span>}
+            {item.micro_skill && <span className="badge">{microSkillLabel(item.micro_skill)}</span>}
             <span
               className={`rounded-full px-2 py-0.5 ${
                 item.missing

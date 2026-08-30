@@ -30,31 +30,40 @@ export default function RegisterPage() {
   return (
     <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-6 sm:p-8">
       <h1 className="text-xl font-semibold">注册</h1>
-      <input
-        className="input"
-        autoComplete="nickname"
-        placeholder="昵称"
-        value={nickname}
-        onChange={(e) => setNickname(e.target.value)}
-      />
-      <input
-        className="input"
-        type="email"
-        inputMode="email"
-        autoComplete="email"
-        placeholder="邮箱"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <input
-        className="input"
-        type="password"
-        autoComplete="new-password"
-        placeholder="密码至少 8 位"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        minLength={8}
-      />
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium text-slate-700">昵称</span>
+        <input
+          className="input"
+          autoComplete="nickname"
+          placeholder="怎么称呼你"
+          value={nickname}
+          onChange={(e) => setNickname(e.target.value)}
+        />
+      </label>
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium text-slate-700">邮箱</span>
+        <input
+          className="input"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          placeholder="邮箱地址"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </label>
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium text-slate-700">密码</span>
+        <input
+          className="input"
+          type="password"
+          autoComplete="new-password"
+          placeholder="至少 8 位"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          minLength={8}
+        />
+      </label>
       {err && <p className="text-sm text-red-600">{err}</p>}
       <button className="btn-primary w-full">创建账号</button>
       <p className="text-sm text-slate-500">

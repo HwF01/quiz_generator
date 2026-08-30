@@ -23,6 +23,7 @@ export default function PlazaPage() {
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("hot");
+  const [loaded, setLoaded] = useState(false);
 
   async function load() {
     const params = new URLSearchParams();
@@ -30,6 +31,7 @@ export default function PlazaPage() {
     if (category) params.set("category", category);
     params.set("sort", sort);
     setItems(await api<Item[]>(`/plaza?${params.toString()}`));
+    setLoaded(true);
   }
 
   useEffect(() => {
@@ -50,6 +52,9 @@ export default function PlazaPage() {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && load()}
         />
+        <button type="button" className="btn-ghost" onClick={() => void load()}>
+          搜索
+        </button>
         <select className="input w-full sm:w-auto" value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="">全部分类</option>
           {["常识", "考公", "考研", "IT", "历史", "自定义"].map((c) => (
@@ -96,6 +101,9 @@ export default function PlazaPage() {
             </div>
           </div>
         ))}
+        {loaded && items.length === 0 && (
+          <p className="text-sm text-slate-500 md:col-span-2">没有符合条件的公开题库。换个关键词，或去上传一份文档出题。</p>
+        )}
       </div>
     </div>
   );
