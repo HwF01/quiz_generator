@@ -32,9 +32,13 @@ BACKEND_URL = "http://127.0.0.1:8000"
 HEALTH_URL = f"{BACKEND_URL}/health"
 BACKEND_PORT = "8000"
 FRONTEND_PORT = "3000"
+WINDOW_WIDTH = 1280
+WINDOW_HEIGHT = 840
+WINDOW_MIN_SIZE = (960, 640)
 
 CREATE_NO_WINDOW = 0x08000000
 _LEGACY_INNO_SECRET = re.compile(r"^[0-9a-f]{80}$")
+_UNSET = object()
 
 
 def _win_no_window() -> int:
@@ -404,6 +408,71 @@ def open_data_dir() -> None:
         subprocess.Popen(["xdg-open", str(path)])
 
 
+def load_webview():
+    try:
+        import webview
+
+        return webview
+    except Exception:
+        return None
+
+
+def configure_webview(settings: dict) -> dict:
+    settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    settings["ALLOW_DOWNLOADS"] = True
+    return settings
+
+
+def desktop_window_menu():
+    try:
+        from webview.menu import Menu, MenuAction
+    except Exception:
+        return []
+    return [Menu("文件", [MenuAction("打开数据目录", open_data_dir)])]
+
+
+def run_app_window(webview=_UNSET) -> bool:
+    """Open the desktop WebView window. True if the GUI loop ran to completion."""
+    module = load_webview() if webview is _UNSET else webview
+    if module is None:
+        return False
+    try:
+        configure_webview(module.settings)
+        module.create_window(
+            APP_TITLE,
+            FRONTEND_URL,
+            width=WINDOW_WIDTH,
+            height=WINDOW_HEIGHT,
+            min_size=WINDOW_MIN_SIZE,
+            text_select=True,
+            menu=desktop_window_menu(),
+        )
+        module.start(
+            private_mode=False,
+            storage_path=str(data_dir() / "webview"),
+        )
+    except Exception:
+        return False
+    return True
+
+
+def run_desktop_ui(on_exit, webview=_UNSET, fallback=None) -> str:
+    """Show the app window, or the tray/status fallback. Returns 'window' or 'tray'."""
+    if run_app_window(webview=webview):
+        on_exit()
+        return "window"
+    (fallback or run_tray)(on_exit)
+    return "tray"
+
+
+def open_existing_instance(webview=_UNSET) -> int:
+    """Attach a new window to an already-running local backend. Do not start processes."""
+    if run_app_window(webview=webview):
+        return 0
+    message_box(f"{APP_TITLE} 已在运行。")
+    return 0
+
+
 def tray_icon_image():
     from PIL import Image, ImageDraw
 
@@ -497,8 +566,7 @@ def main() -> int:
         write_env(cfg, default_config(existing))
 
     if already_running():
-        webbrowser.open(FRONTEND_URL)
-        return 0
+        return open_existing_instance()
 
     try:
         layout = resolve_layout(root)
@@ -548,8 +616,7 @@ def main() -> int:
                 error=True,
             )
             return 1
-        webbrowser.open(FRONTEND_URL)
-        run_tray(cleanup)
+        run_desktop_ui(cleanup)
     except Exception as exc:
         cleanup()
         message_box(f"启动失败：{exc}", error=True)
