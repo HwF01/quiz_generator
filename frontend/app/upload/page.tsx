@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
 import { isUnnamedTitle, nextUnnamedTitle, withDuplicateSuffix } from "@/lib/quiz-title";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import type { SetupStatus } from "@/lib/labels";
+import Link from "next/link";
 
 type Job = {
   id: string;
@@ -81,6 +84,7 @@ export default function UploadPage() {
   const [busy, setBusy] = useState(false);
   const [force, setForce] = useState(false);
   const [dupPrompt, setDupPrompt] = useState<{ requested: string; resolved: string } | null>(null);
+  const [setup, setSetup] = useState<SetupStatus | null>(null);
   const titleTouchedRef = useRef(false);
   const titlesCacheRef = useRef<string[] | null>(null);
   const showDifficulty = subjectTags.some((tag) => ["it", "math", "logic"].includes(tag));
@@ -88,6 +92,9 @@ export default function UploadPage() {
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
+    api<SetupStatus>("/setup")
+      .then(setSetup)
+      .catch(() => setSetup(null));
   }, [router]);
 
   useEffect(() => {
@@ -240,12 +247,28 @@ export default function UploadPage() {
       <div className="card space-y-4 p-4 sm:p-6">
         <h1 className="text-xl font-semibold">上传文档出题</h1>
         <p className="text-sm text-slate-500">支持 PDF / Word / PPT / TXT / Markdown，最大 20MB。扫描件将尝试 OCR。</p>
+        {setup && (
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            {setup.llm_mode === "mock"
+              ? "当前为演示模式，不调用网络模型。"
+              : `已配置${[setup.qwen_configured ? "通义千问" : null, setup.deepseek_configured ? "DeepSeek" : null]
+                  .filter(Boolean)
+                  .join("、") || "出题服务"}。`}
+            {setup.tavily_configured ? " 联网补充可用。" : " 未填写 Tavily Key，不影响普通出题。"}
+            <Link href="/settings" className="ml-1 text-brand-700">
+              去设置
+            </Link>
+          </p>
+        )}
+        <p className="text-xs text-slate-500">
+          {documentId && preview ? "第 2 步：确认题型配额后开始生成。" : "第 1 步：选择文件并填写基本信息，先解析材料。"}
+        </p>
         <label className="block space-y-1.5">
           <span className="text-sm font-medium text-slate-700">出题文件</span>
           <input
             type="file"
             accept=".pdf,.docx,.pptx,.txt,.md"
-            className="w-full max-w-full text-sm"
+            className="file-input"
             onChange={(e) => {
               setFile(e.target.files?.[0] || null);
               setDocumentId(null);
@@ -413,7 +436,7 @@ export default function UploadPage() {
                 联网补充知识
                 <span className="mt-0.5 block text-xs text-slate-500">
                   仅发送从材料提取的主题词，不上传原文；来源会在审校页和作答后展示。
-                  {!preview.web_search_available && " 当前未配置检索服务。"}
+                  {!preview.web_search_available && " 未填写 Tavily Key，不影响普通出题。"}
                 </span>
               </span>
             </label>
@@ -433,7 +456,7 @@ export default function UploadPage() {
         {notice && <p className="text-sm text-emerald-700" role="status" aria-live="polite">{notice}</p>}
         {err && <p className="text-sm text-red-600" role="alert">{err}</p>}
         <button
-          className="btn-primary"
+          className="btn-primary w-full"
           disabled={!file || busy || (allocationMode === "manual" && manualCountTotal !== total)}
           onClick={start}
         >
@@ -446,7 +469,7 @@ export default function UploadPage() {
         {job && (
           <div className="mt-4 space-y-3">
             <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full bg-brand-600" style={{ width: `${job.progress}%` }} />
+              <div className="progress-fill" style={{ width: `${job.progress}%` }} />
             </div>
             <p className="text-sm">
               {job.stage} · {job.progress}%
@@ -463,35 +486,19 @@ export default function UploadPage() {
           </div>
         )}
       </div>
-      {dupPrompt && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 sm:items-center sm:p-4"
-          onClick={() => !busy && setDupPrompt(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="dup-title"
-            className="card w-full max-w-md rounded-t-2xl p-5 sm:rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="dup-title" className="text-lg font-semibold">
-              题库名称已存在
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              「{dupPrompt.requested}」已有同名题库。若仍使用该名称，将自动保存为「{dupPrompt.resolved}」。
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setDupPrompt(null)}>
-                取消
-              </button>
-              <button type="button" className="btn-primary" disabled={busy} onClick={confirmDuplicate}>
-                继续生成
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={dupPrompt !== null}
+        title="题库名称已存在"
+        description={
+          dupPrompt
+            ? `「${dupPrompt.requested}」已有同名题库。若仍使用该名称，将自动保存为「${dupPrompt.resolved}」。`
+            : ""
+        }
+        confirmLabel="继续生成"
+        busy={busy}
+        onCancel={() => !busy && setDupPrompt(null)}
+        onConfirm={() => void confirmDuplicate()}
+      />
     </div>
   );
 }

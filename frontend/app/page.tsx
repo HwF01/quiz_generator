@@ -9,8 +9,7 @@ export default function HomePage() {
           从讲义到强干扰项练习题
         </h1>
         <p className="mt-3 max-w-2xl text-slate-600">
-          上传 PDF / Word / PPT，系统先做篇章映射与关键句抽取，再用 Qwen / Deepseek 出题干，
-          Claude / GPT 过生成干扰项并经语义过滤。你始终可以审校、改题、再发布。
+          上传 PDF / Word / PPT，系统先做篇章映射与关键句抽取，再出题干并生成干扰项。真实出题至少需要一把通义千问或 DeepSeek Key，两把都配更好（文科优先通义、理科优先 DeepSeek）。Tavily 仅在启用「联网补充知识」时需要，可留空。你始终可以审校、改题、再发布。
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link href="/upload" className="btn-primary">

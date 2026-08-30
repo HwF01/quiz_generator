@@ -13,6 +13,7 @@ const links = [
   { href: "/wrong", label: "错题本" },
   { href: "/favorites", label: "收藏" },
 ];
+const authedLinks = [...links, { href: "/settings", label: "设置" }];
 
 export function Nav() {
   const path = usePathname();
@@ -40,17 +41,17 @@ export function Nav() {
           <span className="truncate">智能题库生成器</span>
         </Link>
         <nav className="hidden items-center gap-4 text-sm md:flex">
-          {links.map((l) => (
+          {(authed ? authedLinks : links).map((l) => (
             <Link key={l.href} href={l.href} className={linkClass(l.href)}>
               {l.label}
             </Link>
           ))}
           {authed ? (
-            <button type="button" className="text-slate-500 hover:text-slate-900" onClick={logout}>
+            <button type="button" className="btn-ghost min-h-9 px-3 py-1.5 text-sm" onClick={logout}>
               退出登录
             </button>
           ) : (
-            <Link href="/login" className="text-brand-700">
+            <Link href="/login" className="btn-ghost min-h-9 px-3 py-1.5 text-sm">
               登录
             </Link>
           )}
@@ -68,7 +69,7 @@ export function Nav() {
       {open && (
         <nav className="border-t border-slate-200 bg-white px-4 py-2 md:hidden">
           <div className="mx-auto flex max-w-6xl flex-col">
-            {links.map((l) => (
+            {(authed ? authedLinks : links).map((l) => (
               <Link
                 key={l.href}
                 href={l.href}

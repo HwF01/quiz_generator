@@ -9,6 +9,7 @@ import Link from "next/link";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuizFilterTabs } from "@/components/QuizFilterTabs";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { microSkillLabel } from "@/lib/labels";
 
 type Row = {
   wrong_count: number;
@@ -83,7 +84,7 @@ export default function WrongPage() {
             <article key={r.question.id} className="card p-5">
               <div className="flex items-start justify-between gap-3">
                 <p className="min-w-0 text-xs text-slate-500">
-                  错 {r.wrong_count} 次 · {r.question.micro_skill}
+                  错 {r.wrong_count} 次 · {microSkillLabel(r.question.micro_skill)}
                 </p>
                 <FavoriteButton favorited={r.favorited} onToggle={() => void toggleFav(r.question.id)} />
               </div>
@@ -103,7 +104,7 @@ export default function WrongPage() {
                   再练一次
                 </Link>
                 <button
-                  className="btn-ghost text-red-600"
+                  className="btn-danger"
                   type="button"
                   onClick={() => requestRemove(r.question.id)}
                 >
