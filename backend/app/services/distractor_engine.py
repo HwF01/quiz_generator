@@ -79,12 +79,15 @@ async def overgenerate(stem: str, answer: str, passage: str) -> list[dict]:
         f"题干：{stem}\n正确答案：{answer}\n"
         f"【待考查文本开始】\n{passage[:2500]}\n【待考查文本结束】"
     )
-    raw = await complete_json(provider, prompt, user, temperature=0.7)
-    data = parse_json(raw)
+    try:
+        raw = await complete_json(provider, prompt, user, temperature=0.7)
+        data = parse_json(raw)
+    except Exception:
+        return []
     cands = data.get("candidates") if isinstance(data, dict) else data
     if not isinstance(cands, list):
         return []
-    return [c for c in cands if c.get("text")]
+    return [c for c in cands if isinstance(c, dict) and c.get("text")]
 
 
 async def validate_candidates(
