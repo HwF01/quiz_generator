@@ -39,7 +39,9 @@ async def login(body: LoginIn, db: AsyncSession = Depends(get_db)):
         raise AppError("系统账号禁止登录", code=401, status_code=401)
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, user.password_hash):
+    if not user:
+        raise AppError("邮箱或密码错误", code=401, status_code=401)
+    if not await asyncio.to_thread(verify_password, body.password, user.password_hash):
         raise AppError("邮箱或密码错误", code=401, status_code=401)
     token = create_access_token(user.id)
     return ok({"token": token, "user": UserOut.model_validate(user).model_dump()})
