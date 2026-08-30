@@ -9,6 +9,7 @@ import Link from "next/link";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuizFilterTabs } from "@/components/QuizFilterTabs";
 import { ListSkeleton } from "@/components/ListSkeleton";
+import { microSkillLabel } from "@/lib/labels";
 
 type Row = {
   favorited: boolean;
@@ -69,7 +70,7 @@ export default function FavoritesPage() {
           {g.items.map((r) => (
             <article key={r.question.id} className="card p-5">
               <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 text-xs text-slate-500">{r.question.micro_skill}</p>
+                <p className="min-w-0 text-xs text-slate-500">{microSkillLabel(r.question.micro_skill)}</p>
                 <FavoriteButton favorited={r.favorited} onToggle={() => void toggleFav(r.question.id)} />
               </div>
               <p className="mt-2 break-words font-medium">{r.question.content}</p>

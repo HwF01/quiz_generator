@@ -8,6 +8,7 @@ import { formatOptionLabel } from "@/lib/options";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
 import { ListSkeleton } from "@/components/ListSkeleton";
+import { microSkillLabel, quizStatusLabel } from "@/lib/labels";
 
 type Question = {
   id: string;
@@ -105,14 +106,16 @@ export default function QuizEditPage() {
   const [editError, setEditError] = useState("");
   const [onlyNeedsReview, setOnlyNeedsReview] = useState(false);
   const [hardeningId, setHardeningId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState("");
 
   async function load() {
     const data = await api<Quiz>(`/quizzes/${id}?purpose=review`);
     setQuiz(data);
+    setLoadError("");
   }
 
   useEffect(() => {
-    load().catch((e) => setMsg(e.message));
+    load().catch((e) => setLoadError(e instanceof Error ? e.message : "加载失败"));
   }, [id]);
 
   const sorted = useMemo(() => {
@@ -205,11 +208,17 @@ export default function QuizEditPage() {
   }
 
   if (!quiz) {
-    return (
-      <div className="space-y-6">
-        {msg ? <p className="text-sm text-red-600">{msg}</p> : <ListSkeleton columns={false} cards={3} label="正在加载题库" />}
-      </div>
-    );
+    if (loadError) {
+      return (
+        <div className="card space-y-3 p-4 sm:p-6">
+          <p className="text-sm text-red-600">{loadError}</p>
+          <Link className="btn-ghost" href="/profile">
+            返回我的题库
+          </Link>
+        </div>
+      );
+    }
+    return <ListSkeleton columns={false} cards={3} label="正在加载题库" />;
   }
 
   return (
@@ -218,7 +227,7 @@ export default function QuizEditPage() {
         <div>
           <h1 className="text-2xl font-semibold break-words">{quiz.title}</h1>
           <p className="text-sm text-slate-500">
-            {quiz.category} · {quiz.subject} · {quiz.status}
+            {quiz.category} · {quiz.subject} · {quizStatusLabel(quiz.status)}
           </p>
           <p className="mt-1 text-sm text-amber-700">待审校 {pendingCount} / {quiz.questions.length} 题</p>
         </div>
@@ -265,7 +274,7 @@ export default function QuizEditPage() {
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
               <span className="badge">第 {idx + 1} 题</span>
               <span className="badge">{questionTypeLabel(q.type)}</span>
-              <span className="badge">{q.micro_skill}</span>
+              <span className="badge">{microSkillLabel(q.micro_skill)}</span>
               <span className="badge">{difficultyLabel(q.difficulty)}</span>
               {q.needs_review && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">待审校</span>}
               {q.quality_scores?.usability != null && <span className="badge">可用性 {q.quality_scores.usability}/5</span>}
@@ -381,7 +390,7 @@ export default function QuizEditPage() {
                 {q.needs_review ? "标记已审" : "标记待审"}
               </button>
               <button
-                className="btn-ghost text-red-600"
+                className="btn-danger"
                 onClick={async () => {
                   await api(`/quizzes/questions/${q.id}`, { method: "DELETE" });
                   load();

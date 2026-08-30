@@ -118,6 +118,63 @@ def test_open_existing_instance_attaches_window_without_message(tmp_path, monkey
     assert messages == []
 
 
+def test_apply_wizard_choices_demo_does_not_require_keys():
+    launcher = load_launcher()
+    values = launcher.apply_wizard_choices({}, demo=True)
+    assert values["MOCK_LLM"] == "true"
+    assert values["SETUP_COMPLETE"] == "true"
+    assert not values.get("QWEN_API_KEY")
+    assert not values.get("DEEPSEEK_API_KEY")
+
+
+def test_apply_wizard_choices_saves_both_keys_and_optional_tavily():
+    launcher = load_launcher()
+    values = launcher.apply_wizard_choices(
+        {"SECRET_KEY": "keep-me"},
+        demo=False,
+        qwen_key=" qwen-key ",
+        deepseek_key="ds-key",
+        tavily_key=" tv-key ",
+    )
+    assert values["MOCK_LLM"] == "false"
+    assert values["QWEN_API_KEY"] == "qwen-key"
+    assert values["DEEPSEEK_API_KEY"] == "ds-key"
+    assert values["TAVILY_API_KEY"] == "tv-key"
+    assert values["SECRET_KEY"] == "keep-me"
+
+
+def test_apply_wizard_choices_allows_qwen_only():
+    launcher = load_launcher()
+    values = launcher.apply_wizard_choices({}, demo=False, qwen_key="only-qwen")
+    assert values["QWEN_API_KEY"] == "only-qwen"
+    assert not values.get("DEEPSEEK_API_KEY")
+    assert values["MOCK_LLM"] == "false"
+
+
+def test_apply_wizard_choices_tavily_optional_when_live():
+    launcher = load_launcher()
+    values = launcher.apply_wizard_choices({}, demo=False, deepseek_key="ds-only")
+    assert values["DEEPSEEK_API_KEY"] == "ds-only"
+    assert not values.get("TAVILY_API_KEY")
+
+
+def test_apply_wizard_choices_rejects_live_without_generator_key():
+    launcher = load_launcher()
+    try:
+        launcher.apply_wizard_choices({}, demo=False, tavily_key="tv")
+    except launcher.WizardError as exc:
+        assert "至少填写" in str(exc)
+    else:
+        raise AssertionError("expected WizardError")
+
+
+def test_apply_wizard_choices_demo_may_still_save_tavily():
+    launcher = load_launcher()
+    values = launcher.apply_wizard_choices({}, demo=True, tavily_key="tv-demo")
+    assert values["MOCK_LLM"] == "true"
+    assert values["TAVILY_API_KEY"] == "tv-demo"
+
+
 def test_open_existing_instance_does_not_open_system_browser(monkeypatch):
     launcher = load_launcher()
     messages: list[str] = []

@@ -10,6 +10,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { PlayDetailCards, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CardSkeleton } from "@/components/ListSkeleton";
+import { microSkillLabel } from "@/lib/labels";
 
 type Question = {
   id: string;
@@ -79,6 +80,7 @@ export default function PracticePage() {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [gradingQuestionId, setGradingQuestionId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
@@ -95,6 +97,8 @@ export default function PracticePage() {
       setMeId(me?.id ?? null);
       setQuiz({ ...raw, questions });
       setIdx(0);
+    }).catch((e) => {
+      setLoadError(e instanceof Error ? e.message : "加载失败");
     });
     // 只依赖 id：切顺序/随机只 shuffle 本地副本，不重拉。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -256,7 +260,17 @@ export default function PracticePage() {
   }
 
   if (!quiz) {
-    return msg ? <p className="text-sm text-red-600">{msg}</p> : <CardSkeleton lines={6} />;
+    if (loadError) {
+      return (
+        <div className="card space-y-3 p-4 sm:p-6">
+          <p className="text-sm text-red-600">{loadError}</p>
+          <Link className="btn-ghost" href="/plaza">
+            返回广场
+          </Link>
+        </div>
+      );
+    }
+    return <CardSkeleton lines={6} />;
   }
   if (!q) {
     return (
@@ -371,7 +385,7 @@ export default function PracticePage() {
         </div>
       </div>
       <p className="break-words text-lg">{q.content}</p>
-      <p className="text-xs text-slate-400">微技能 {q.micro_skill}</p>
+      <p className="text-xs text-slate-400">微技能 {microSkillLabel(q.micro_skill)}</p>
       {msg && <p className="text-sm text-red-600">{msg}</p>}
       {isConstructedQuestion(q) ? (
         <fieldset className="space-y-3">
@@ -440,7 +454,7 @@ export default function PracticePage() {
           上一题
         </button>
         {canDelete && (
-          <button className="btn-ghost text-red-600" onClick={requestRemoveCurrent}>
+          <button className="btn-danger" onClick={requestRemoveCurrent}>
             删除
           </button>
         )}
