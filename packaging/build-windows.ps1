@@ -139,6 +139,7 @@ Get-Content (Join-Path $RepoRoot "backend\requirements.txt") |
     Where-Object { $_ -notmatch 'pytest' } |
     Set-Content -Encoding utf8 $ReqFile
 Add-Content $ReqFile "pystray"
+Add-Content $ReqFile "pywebview==6.2.1"
 & $PayloadPy -m ensurepip --upgrade
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ensurepip failed, trying get-pip.py"
