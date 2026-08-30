@@ -388,14 +388,14 @@ async def my_plays(
     db: AsyncSession = Depends(get_db),
 ):
     rows = await db.execute(
-        select(PlayRecord)
+        select(PlayRecord, QuizSet)
+        .outerjoin(QuizSet, QuizSet.id == PlayRecord.quiz_set_id)
         .where(PlayRecord.user_id == user.id)
         .order_by(PlayRecord.created_at.desc())
         .limit(50)
     )
     items = []
-    for r in rows.scalars().all():
-        quiz = await db.get(QuizSet, r.quiz_set_id)
+    for r, quiz in rows.all():
         items.append(
             {
                 "id": r.id,
@@ -464,7 +464,9 @@ async def wrong_questions(
     db: AsyncSession = Depends(get_db),
 ):
     rows = await db.execute(
-        select(WrongQuestion)
+        select(WrongQuestion, Question, QuizSet)
+        .join(Question, Question.id == WrongQuestion.question_id)
+        .outerjoin(QuizSet, QuizSet.id == WrongQuestion.quiz_set_id)
         .where(WrongQuestion.user_id == user.id)
         .order_by(WrongQuestion.last_wrong_at.desc())
     )
@@ -473,11 +475,7 @@ async def wrong_questions(
     )
     fav_ids = set(fav_rows.scalars().all())
     out = []
-    for w in rows.scalars().all():
-        q = await db.get(Question, w.question_id)
-        if not q:
-            continue
-        quiz = await db.get(QuizSet, w.quiz_set_id or q.quiz_set_id)
+    for w, q, quiz in rows.all():
         out.append(
             {
                 "wrong_count": w.wrong_count,
@@ -507,16 +505,14 @@ async def question_favorites(
     db: AsyncSession = Depends(get_db),
 ):
     rows = await db.execute(
-        select(QuestionFavorite)
+        select(QuestionFavorite, Question, QuizSet)
+        .join(Question, Question.id == QuestionFavorite.question_id)
+        .outerjoin(QuizSet, QuizSet.id == QuestionFavorite.quiz_set_id)
         .where(QuestionFavorite.user_id == user.id)
         .order_by(QuestionFavorite.created_at.desc())
     )
     out = []
-    for fav in rows.scalars().all():
-        q = await db.get(Question, fav.question_id)
-        if not q:
-            continue
-        quiz = await db.get(QuizSet, fav.quiz_set_id or q.quiz_set_id)
+    for fav, q, quiz in rows.all():
         out.append(
             {
                 "favorited": True,

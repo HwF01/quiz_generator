@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +49,7 @@ async def plaza(
             {"id": z.id, "text": f"{z.title} {z.description or ''} {z.category}"}
             for z in rows
         ]
-        ranked_ids = [d["id"] for d in SQARetrieval(docs).search(q, k=len(docs))]
+        ranked_ids = await asyncio.to_thread(_plaza_rank_ids, docs, q)
         order = {i: n for n, i in enumerate(ranked_ids)}
         rows = sorted(rows, key=lambda z: order.get(z.id, 999))
 
@@ -55,11 +57,17 @@ async def plaza(
     if user:
         favs = await db.execute(select(Favorite.quiz_set_id).where(Favorite.user_id == user.id))
         fav_ids = set(favs.scalars().all())
+    avg_map: dict[str, float] = {}
+    ids = [z.id for z in rows]
+    if ids:
+        avg_rows = await db.execute(
+            select(QuizRating.quiz_set_id, func.avg(QuizRating.score))
+            .where(QuizRating.quiz_set_id.in_(ids))
+            .group_by(QuizRating.quiz_set_id)
+        )
+        avg_map = {qid: float(avg or 0) for qid, avg in avg_rows.all()}
     out = []
     for z in rows:
-        avg = await db.scalar(
-            select(func.avg(QuizRating.score)).where(QuizRating.quiz_set_id == z.id)
-        )
         out.append(
             {
                 "id": z.id,
@@ -71,11 +79,15 @@ async def plaza(
                 "likes": z.likes,
                 "plays": z.plays,
                 "is_builtin": z.is_builtin,
-                "avg_rating": float(avg or 0),
+                "avg_rating": avg_map.get(z.id, 0.0),
                 "favorited": z.id in fav_ids,
             }
         )
     return ok(out)
+
+
+def _plaza_rank_ids(docs: list[dict], query: str) -> list[str]:
+    return [d["id"] for d in SQARetrieval(docs).search(query, k=len(docs))]
 
 
 @router.get("/categories")
