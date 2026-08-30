@@ -72,8 +72,8 @@ def choice_structure_valid(question: dict) -> bool:
     return (
         all(option_keys)
         and all(option_texts)
-        and len(set(option_keys)) == 4
-        and len(set(option_texts)) == 4
+        and len(set(option_keys)) == expected_options
+        and len(set(option_texts)) == expected_options
         and keys[0] in option_keys
     )
 
@@ -151,10 +151,17 @@ async def apply_gates(
     usability = int((scores.get("usability") or 0) if critic_error else (scores.get("usability") or 3))
     if scores.get("answer_exists") is False:
         exists = False
+    check_distractors = question.get("type") == "single_choice"
     invalid_distractor_keys = [
-        str(key) for key in (scores.get("invalid_distractor_keys") or []) if key
+        str(key)
+        for key in (scores.get("invalid_distractor_keys") or [])
+        if key and check_distractors
     ]
-    distractors_valid = bool(scores.get("all_distractors_valid", not invalid_distractor_keys))
+    distractors_valid = (
+        bool(scores.get("all_distractors_valid", not invalid_distractor_keys))
+        if check_distractors
+        else True
+    )
     reasons = existing_reasons
     if not structure:
         reasons.append("invalid_choice_structure")
@@ -199,18 +206,6 @@ async def apply_gates(
         or not distractors_valid
         or critic_error
     )
-    if question.get("type") == "single_choice" and (
-        invalid_distractor_keys or not distractors_valid or critic_error
-    ):
-        answer = question.get("answer") or {}
-        correct_keys = set(answer.get("keys") or [])
-        correct_texts = [
-            str(option.get("text") or "")
-            for option in question.get("options") or []
-            if option.get("key") in correct_keys
-        ]
-        question["options"] = None
-        question["answer"] = {"texts": correct_texts or list(answer.get("texts") or [])}
     question["quality_scores"] = {
         "fluency": scores.get("fluency", 0 if critic_error else 3),
         "accuracy": scores.get("accuracy", 0 if critic_error else 3),
