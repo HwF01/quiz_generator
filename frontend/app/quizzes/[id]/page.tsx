@@ -7,6 +7,7 @@ import { api, downloadAuth, getToken } from "@/lib/api";
 import { formatOptionLabel } from "@/lib/options";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
+import { ListSkeleton } from "@/components/ListSkeleton";
 
 type Question = {
   id: string;
@@ -203,7 +204,13 @@ export default function QuizEditPage() {
     }
   }
 
-  if (!quiz) return <p>{msg || "加载中…"}</p>;
+  if (!quiz) {
+    return (
+      <div className="space-y-6">
+        {msg ? <p className="text-sm text-red-600">{msg}</p> : <ListSkeleton columns={false} cards={3} label="正在加载题库" />}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

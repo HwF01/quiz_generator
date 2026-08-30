@@ -6,6 +6,7 @@ import { api, getToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { PlayDetailDialog, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ListSkeleton } from "@/components/ListSkeleton";
 
 type Quiz = {
   id: string;
@@ -68,16 +69,19 @@ export default function ProfilePage() {
   const [detailError, setDetailError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!getToken()) {
       router.push("/login");
       return;
     }
-    api<typeof me>("/auth/me").then(setMe);
-    api<Quiz[]>("/quizzes").then(setQuizzes);
-    api<Quiz[]>("/quizzes/favorites").then(setFavs).catch(() => setFavs([]));
-    api<Play[]>("/plays").then(setPlays).catch(() => setPlays([]));
+    Promise.all([
+      api<typeof me>("/auth/me").then(setMe),
+      api<Quiz[]>("/quizzes").then(setQuizzes),
+      api<Quiz[]>("/quizzes/favorites").then(setFavs).catch(() => setFavs([])),
+      api<Play[]>("/plays").then(setPlays).catch(() => setPlays([])),
+    ]).finally(() => setLoading(false));
   }, [router]);
 
   async function openDetail(playId: string) {
@@ -111,6 +115,18 @@ export default function ProfilePage() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-2xl font-semibold">我的题库</h1>
+          <p className="text-sm text-slate-500">正在加载你的题库与练习记录。</p>
+        </div>
+        <ListSkeleton cards={3} label="正在加载我的题库" />
+      </div>
+    );
   }
 
   return (

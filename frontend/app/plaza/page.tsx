@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, getToken } from "@/lib/api";
 import { FavoriteButton } from "@/components/FavoriteButton";
+import { ListSkeleton } from "@/components/ListSkeleton";
 
 type Item = {
   id: string;
@@ -20,16 +21,22 @@ type Item = {
 
 export default function PlazaPage() {
   const [items, setItems] = useState<Item[]>([]);
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("hot");
 
-  async function load() {
+  async function load(opts?: { silent?: boolean }) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (category) params.set("category", category);
     params.set("sort", sort);
-    setItems(await api<Item[]>(`/plaza?${params.toString()}`));
+    if (!opts?.silent) setLoading(true);
+    try {
+      setItems(await api<Item[]>(`/plaza?${params.toString()}`));
+    } finally {
+      if (!opts?.silent) setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -61,6 +68,9 @@ export default function PlazaPage() {
           <option value="new">最新</option>
         </select>
       </div>
+      {loading ? (
+        <ListSkeleton label="正在加载广场题库" />
+      ) : (
       <div className="grid gap-4 md:grid-cols-2">
         {items.map((it) => (
           <div key={it.id} className="card p-5">
@@ -77,7 +87,9 @@ export default function PlazaPage() {
                   <FavoriteButton
                     favorited={it.favorited}
                     onToggle={() => {
-                      void api(`/quizzes/${it.id}/favorite`, { method: "POST" }).then(() => load());
+                      void api(`/quizzes/${it.id}/favorite`, { method: "POST" }).then(() =>
+                        load({ silent: true })
+                      );
                     }}
                   />
                 )}
@@ -97,6 +109,7 @@ export default function PlazaPage() {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

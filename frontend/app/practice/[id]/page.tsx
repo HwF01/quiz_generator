@@ -9,6 +9,7 @@ import { Star } from "lucide-react";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { PlayDetailCards, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CardSkeleton } from "@/components/ListSkeleton";
 
 type Question = {
   id: string;
@@ -254,7 +255,9 @@ export default function PracticePage() {
     }
   }
 
-  if (!quiz) return <p>加载中…</p>;
+  if (!quiz) {
+    return msg ? <p className="text-sm text-red-600">{msg}</p> : <CardSkeleton lines={6} />;
+  }
   if (!q) {
     return (
       <div className="card space-y-3 p-4 sm:p-6">

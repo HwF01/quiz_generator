@@ -9,6 +9,7 @@ import Link from "next/link";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuizFilterTabs } from "@/components/QuizFilterTabs";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ListSkeleton } from "@/components/ListSkeleton";
 
 type Row = {
   wrong_count: number;
@@ -31,10 +32,15 @@ export default function WrongPage() {
   const [quizId, setQuizId] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  async function load() {
-    const data = await api<Row[]>("/wrong-questions");
-    setRows(data);
+  async function load(opts?: { silent?: boolean }) {
+    if (!opts?.silent) setLoading(true);
+    try {
+      setRows(await api<Row[]>("/wrong-questions"));
+    } finally {
+      if (!opts?.silent) setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -55,7 +61,7 @@ export default function WrongPage() {
     try {
       await api(`/wrong-questions/${pendingId}`, { method: "DELETE" });
       setPendingId(null);
-      await load();
+      await load({ silent: true });
     } finally {
       setDeleteBusy(false);
     }
@@ -63,14 +69,15 @@ export default function WrongPage() {
 
   async function toggleFav(questionId: string) {
     await api(`/quizzes/questions/${questionId}/favorite`, { method: "POST" });
-    await load();
+    await load({ silent: true });
   }
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">错题本</h1>
-      <QuizFilterTabs quizzes={quizzes} activeId={quizId} onSelect={setQuizId} />
-      {groups.map((g) => (
+      {loading ? <ListSkeleton columns={false} cards={3} label="正在加载错题本" /> : null}
+      {loading ? null : <QuizFilterTabs quizzes={quizzes} activeId={quizId} onSelect={setQuizId} />}
+      {!loading && groups.map((g) => (
         <section key={g.quiz.id} className="space-y-3">
           <h2 className="text-sm font-medium text-slate-600">
             <Link href={`/quizzes/${g.quiz.id}`} className="hover:text-brand-700 hover:underline">
@@ -114,7 +121,7 @@ export default function WrongPage() {
           ))}
         </section>
       ))}
-      {rows.length === 0 && <p className="text-sm text-slate-500">还没有错题。</p>}
+      {!loading && rows.length === 0 && <p className="text-sm text-slate-500">还没有错题。</p>}
       <ConfirmDialog
         open={pendingId !== null}
         title="从错题本删除"
