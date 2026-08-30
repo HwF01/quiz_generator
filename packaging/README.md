@@ -49,6 +49,10 @@ python packaging\launcher.py
 
 首次会弹出设置向导。配置写入 `%APPDATA%\QuizGen\config.env`。
 
+前后端就绪后打开 **WebView2 独立窗口**（Edge 内核），不再默认打开系统浏览器。关闭窗口即停止本机前后端。菜单「文件 → 打开数据目录」可打开 `%APPDATA%\QuizGen`。
+
+界面依赖系统已安装的 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2)。普通 Windows 10/11 随 Edge 自带；精简版 / LTSC / 未装 Edge 的机器需先装 Evergreen Runtime。缺少 WebView2 或 `pywebview` 无法加载时，启动器回退为系统浏览器 + 托盘（与旧行为相同）。
+
 便携版请双击 `QuizGen.cmd`，首次配置会在命令窗口中完成；这避免依赖嵌入式 Python 不包含的图形 `tkinter` 组件。
 
 ## SmartScreen

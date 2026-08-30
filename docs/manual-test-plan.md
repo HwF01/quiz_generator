@@ -248,10 +248,10 @@ LLM 建议分两轮：
 
 见 [packaging/README.md](../packaging/README.md)：
 
-1. 安装 / 便携版启动 → 浏览器开 `127.0.0.1:3000`
+1. 安装 / 便携版启动 → 独立窗口打开本机界面（`127.0.0.1:3000`）；关窗即退出
 2. 演示模式（Mock）走通冒烟
 3. 向导填真实 Key 再出一题
-4. 托盘退出；数据在 `%APPDATA%\QuizGen`
+4. 关闭窗口退出；数据在 `%APPDATA%\QuizGen`
 5. SmartScreen「仍要运行」可接受性（未签名）
 6. 安装器选择 Qwen / DeepSeek 但留空 Key → 必须不能继续；便携版经 `QuizGen.cmd` 能完成首次配置
 7. 升级安装后原 `%APPDATA%\QuizGen\config.env`、数据库和上传文件仍保留
