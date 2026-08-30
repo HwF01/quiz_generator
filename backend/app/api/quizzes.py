@@ -344,6 +344,8 @@ async def patch_question(
     if body.needs_review is False and (not structure_ok or not rubric_ok):
         if is_constructed(candidate):
             raise AppError("请先补全小问、正解和评分量规，再标记已审", code=400)
+        if candidate.get("type") == "true_false":
+            raise AppError("请先补全对/错选项并指定唯一正解，再标记已审", code=400)
         raise AppError("请先补全 4 个不同选项并指定唯一正解，再标记已审", code=400)
     for field in (
         "content",

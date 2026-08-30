@@ -108,10 +108,15 @@ async def test_critic_error_forces_review(monkeypatch):
     assert scores["critic_error"] is True
     assert scores["usability"] == 0
     assert scores["answer_exists"] is False
+    assert out["options"] == [
+        {"key": "A", "text": "叶绿体"},
+        {"key": "B", "text": "线粒体"},
+    ]
+    assert out["answer"] == {"keys": ["A"], "texts": ["叶绿体"]}
 
 
 @pytest.mark.asyncio
-async def test_invalid_distractor_clears_choice_options(monkeypatch):
+async def test_invalid_distractor_keeps_choice_options(monkeypatch):
     question = {
         "type": "single_choice",
         "content": "光合作用主要发生在哪里？",
@@ -137,10 +142,80 @@ async def test_invalid_distractor_clears_choice_options(monkeypatch):
     monkeypatch.setattr("app.services.quality_gates.complete_json", _judge)
     out = await apply_gates(question, "光合作用发生在叶绿体中，线粒体进行呼吸作用。")
 
-    assert out["options"] is None
-    assert out["answer"] == {"texts": ["叶绿体"]}
+    assert out["options"] == [
+        {"key": "A", "text": "叶绿体"},
+        {"key": "B", "text": "线粒体"},
+        {"key": "C", "text": "核糖体"},
+        {"key": "D", "text": "高尔基体"},
+    ]
+    assert out["answer"] == {"keys": ["A"], "texts": ["叶绿体"]}
     assert out["needs_review"] is True
     assert "invalid_distractor" in out["quality_scores"]["review_reasons"]
+
+
+def test_true_false_structure_accepts_dui_cuo():
+    question = {
+        "type": "true_false",
+        "options": [
+            {"key": "对", "text": "对"},
+            {"key": "错", "text": "错"},
+        ],
+        "answer": {"keys": ["对"]},
+    }
+    assert choice_structure_valid(question)
+
+
+def test_true_false_structure_rejects_duplicate_or_missing_options():
+    duplicate = {
+        "type": "true_false",
+        "options": [
+            {"key": "对", "text": "对"},
+            {"key": "对", "text": "对"},
+        ],
+        "answer": {"keys": ["对"]},
+    }
+    missing = {
+        "type": "true_false",
+        "options": [{"key": "对", "text": "对"}],
+        "answer": {"keys": ["对"]},
+    }
+    assert not choice_structure_valid(duplicate)
+    assert not choice_structure_valid(missing)
+
+
+@pytest.mark.asyncio
+async def test_apply_gates_does_not_flag_valid_true_false(monkeypatch):
+    question = {
+        "type": "true_false",
+        "content": "光合作用主要发生在叶绿体中。",
+        "options": [
+            {"key": "对", "text": "对"},
+            {"key": "错", "text": "错"},
+        ],
+        "answer": {"keys": ["对"], "texts": ["对"]},
+        "source_span": {"quote": "光合作用发生在叶绿体中"},
+    }
+
+    async def _judge(*_args, **_kwargs):
+        return (
+            '{"fluency":4,"accuracy":4,"complexity":3,"usability":4,'
+            '"answer_exists":true,"unique_correct":true,"leak":false,'
+            '"controversial":false,"guessable":false,"difficulty_match":true,'
+            '"all_distractors_valid":false,"invalid_distractor_keys":["错"],'
+            '"comment":"按四选项规则误拦判断题"}'
+        )
+
+    monkeypatch.setattr("app.services.quality_gates.complete_json", _judge)
+    out = await apply_gates(question, "光合作用发生在叶绿体中")
+
+    assert out["options"] == [
+        {"key": "对", "text": "对"},
+        {"key": "错", "text": "错"},
+    ]
+    assert out["needs_review"] is False
+    reasons = out["quality_scores"]["review_reasons"]
+    assert "invalid_choice_structure" not in reasons
+    assert "invalid_distractor" not in reasons
 
 
 def test_bkt_increases_on_correct():

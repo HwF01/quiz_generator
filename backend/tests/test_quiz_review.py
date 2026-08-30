@@ -72,6 +72,65 @@ async def test_incomplete_choice_cannot_be_marked_reviewed(client, session_facto
     assert response.json()["message"] == "请先补全 4 个不同选项并指定唯一正解，再标记已审"
 
 
+async def _quiz_with_true_false(client, session_factory, *, complete: bool):
+    registered = await register(client, "tf-review@example.com")
+    token = registered["token"]
+    me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    user_id = me.json()["data"]["id"]
+    async with session_factory() as db:
+        quiz = QuizSet(creator_id=user_id, title="判断题审校", status="ready", visibility="private")
+        db.add(quiz)
+        await db.flush()
+        question = Question(
+            quiz_set_id=quiz.id,
+            type="true_false",
+            content="光合作用主要发生在叶绿体中。",
+            options=(
+                [
+                    {"key": "对", "text": "对"},
+                    {"key": "错", "text": "错"},
+                ]
+                if complete
+                else [{"key": "对", "text": "对"}]
+            ),
+            answer={"keys": ["对"], "texts": ["对"]},
+            micro_skill="detail",
+            quality_scores={},
+            needs_review=True,
+        )
+        db.add(question)
+        await db.commit()
+        return token, question.id
+
+
+@pytest.mark.asyncio
+async def test_complete_true_false_can_be_marked_reviewed(client, session_factory):
+    token, question_id = await _quiz_with_true_false(client, session_factory, complete=True)
+
+    response = await client.patch(
+        f"/api/quizzes/questions/{question_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"needs_review": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["needs_review"] is False
+
+
+@pytest.mark.asyncio
+async def test_incomplete_true_false_cannot_be_marked_reviewed(client, session_factory):
+    token, question_id = await _quiz_with_true_false(client, session_factory, complete=False)
+
+    response = await client.patch(
+        f"/api/quizzes/questions/{question_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"needs_review": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "请先补全对/错选项并指定唯一正解，再标记已审"
+
+
 @pytest.mark.asyncio
 async def test_quiz_with_pending_question_cannot_be_published(client, session_factory):
     token, quiz_id, _ = await _quiz_with_questions(client, session_factory)
