@@ -15,7 +15,12 @@ def get_redis() -> Any:
         else:
             from redis.asyncio import Redis
 
-            _redis = Redis.from_url(settings.redis_url, decode_responses=True)
+            _redis = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=5,
+            )
     return _redis
 
 
