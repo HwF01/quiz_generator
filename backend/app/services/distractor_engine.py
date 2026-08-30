@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
@@ -217,20 +218,30 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
         return _pack(stem_payload, None, structured_answer, None, chunk_id)
 
     cands = await overgenerate(stem, answer, passage)
-    filtered = filter_candidates(cands, answer=answer, stem=stem, passage=passage)
+    filtered = await asyncio.to_thread(
+        filter_candidates, cands, answer=answer, stem=stem, passage=passage
+    )
     validated, critic_error = await validate_candidates(
         filtered, stem=stem, answer=answer, passage=passage
     )
     if len(validated) < 3 and not critic_error:
         extra = await overgenerate(stem, answer, passage)
-        filtered = filter_candidates(
-            filtered + extra, answer=answer, stem=stem, passage=passage
+        filtered = await asyncio.to_thread(
+            filter_candidates,
+            filtered + extra,
+            answer=answer,
+            stem=stem,
+            passage=passage,
         )
         validated, retry_critic_error = await validate_candidates(
             filtered, stem=stem, answer=answer, passage=passage
         )
         critic_error = retry_critic_error
-    ranked = rank_candidates(validated, answer=answer, stem=stem, passage=passage)[:3]
+    ranked = (
+        await asyncio.to_thread(
+            rank_candidates, validated, answer=answer, stem=stem, passage=passage
+        )
+    )[:3]
     if len(ranked) < 3:
         draft = _pack(
             stem_payload,
