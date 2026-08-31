@@ -9,7 +9,8 @@ import { useEffect, useState } from "react";
 const links = [
   { href: "/upload", label: "上传出题" },
   { href: "/plaza", label: "社区广场" },
-  { href: "/profile", label: "我的题库" },
+  { href: "/practice", label: "点击刷题" },
+  { href: "/profile", label: "题库管理/审校" },
   { href: "/wrong", label: "错题本" },
   { href: "/favorites", label: "收藏" },
 ];

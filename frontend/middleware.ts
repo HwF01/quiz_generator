@@ -18,6 +18,7 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
+    "/practice",
     "/practice/:path*",
     "/upload",
     "/upload/:path*",

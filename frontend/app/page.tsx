@@ -15,6 +15,9 @@ export default function HomePage() {
           <Link href="/upload" className="btn-primary">
             开始出题
           </Link>
+          <Link href="/practice" className="btn-ghost">
+            点击刷题
+          </Link>
           <Link href="/plaza" className="btn-ghost">
             逛广场
           </Link>
