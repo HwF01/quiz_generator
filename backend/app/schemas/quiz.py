@@ -96,6 +96,15 @@ class GenerateQuizIn(BaseModel):
     force: bool = False
 
 
+class RetryQuizIn(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=50)
+    subject: str | None = Field(default=None, max_length=50)
+    visibility: Literal["private", "public"] | None = None
+    blueprint: QuizBlueprint | None = None
+    force: bool | None = None
+
+
 class GenerationPreviewIn(BaseModel):
     blueprint: QuizBlueprint = Field(default_factory=QuizBlueprint)
     subject: str = Field(default="auto", max_length=50)

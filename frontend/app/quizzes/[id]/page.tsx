@@ -121,12 +121,30 @@ export default function QuizEditPage() {
   const [loadError, setLoadError] = useState("");
   const [job, setJob] = useState<Job | null>(null);
   const [generationFailed, setGenerationFailed] = useState(false);
-  const inFlight = Boolean(!generationFailed && quiz && isQuizWaitingForQuestions(quiz));
+  const [retrying, setRetrying] = useState(false);
+  const failed = Boolean(generationFailed || quiz?.status === "failed");
+  const inFlight = Boolean(!failed && quiz && isQuizWaitingForQuestions(quiz));
 
   async function load() {
     const data = await api<Quiz>(`/quizzes/${id}?purpose=review`);
     setQuiz(data);
-    setLoadError("");
+    if (data.status === "failed") {
+      setGenerationFailed(true);
+      const jobId = data.generation_job_id;
+      if (jobId) {
+        try {
+          const next = await api<Job>(`/jobs/${jobId}`);
+          setJob(next);
+          setLoadError(next.error || "生成失败");
+        } catch {
+          setLoadError("生成失败");
+        }
+      } else {
+        setLoadError("生成失败");
+      }
+    } else {
+      setLoadError("");
+    }
     return data;
   }
 
@@ -157,9 +175,7 @@ export default function QuizEditPage() {
         }
         if (next.status === "failed") {
           stopPolling();
-          setGenerationFailed(true);
-          setLoadError(next.error || "生成失败");
-          setQuiz(null);
+          await load();
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : "";
@@ -205,6 +221,22 @@ export default function QuizEditPage() {
     () => quiz?.questions.filter((question) => question.needs_review).length ?? 0,
     [quiz]
   );
+
+  async function retryGeneration() {
+    setRetrying(true);
+    setActionError("");
+    setLoadError("");
+    try {
+      await api(`/quizzes/${id}/retry`, { method: "POST", body: JSON.stringify({}) });
+      setGenerationFailed(false);
+      await load();
+    } catch (e) {
+      setGenerationFailed(true);
+      setActionError(e instanceof Error ? e.message : "重试失败");
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function saveMeta(patch: Partial<Quiz>) {
     await api(`/quizzes/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
@@ -304,29 +336,42 @@ export default function QuizEditPage() {
           <p className="text-sm text-slate-500">
             {quiz.category} · {quiz.subject} · {quizStatusLabel(quiz.status)}
           </p>
-          {!inFlight && (
+          {!inFlight && !failed && (
             <p className="mt-1 text-sm text-amber-700">待审校 {pendingCount} / {quiz.questions.length} 题</p>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            className={`btn-primary ${inFlight ? "pointer-events-none opacity-50" : ""}`}
-            href={`/practice/${quiz.id}`}
-            aria-disabled={inFlight}
-            onClick={(event) => {
-              if (inFlight) event.preventDefault();
-            }}
-          >
-            开始刷题
-          </Link>
+          {failed ? (
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={retrying}
+              onClick={() => void retryGeneration()}
+            >
+              {retrying ? "提交中…" : "用同一文档重试"}
+            </button>
+          ) : (
+            <Link
+              className={`btn-primary ${inFlight ? "pointer-events-none opacity-50" : ""}`}
+              href={`/practice/${quiz.id}`}
+              aria-disabled={inFlight}
+              onClick={(event) => {
+                if (inFlight) event.preventDefault();
+              }}
+            >
+              开始刷题
+            </Link>
+          )}
           <button
             className="btn-ghost"
+            disabled={failed || inFlight}
             onClick={() => downloadAuth(`/export/${quiz.id}.xlsx`, `${quiz.title}.xlsx`)}
           >
             导出 Excel
           </button>
           <button
             className="btn-ghost"
+            disabled={failed || inFlight}
             onClick={() => downloadAuth(`/export/${quiz.id}.json`, `${quiz.title}.json`)}
           >
             导出 JSON
@@ -343,7 +388,12 @@ export default function QuizEditPage() {
       </div>
       {msg && <p className="text-sm text-brand-700">{msg}</p>}
       {loadError && <p className="text-sm text-red-600">{loadError}</p>}
-      {!inFlight && (
+      {failed && (
+        <div className="card p-5" role="status">
+          <p className="text-sm text-slate-700">生成失败，标题、题型配额和文档关联已保留，可直接重试。</p>
+        </div>
+      )}
+      {!inFlight && !failed && (
         <div className="flex items-center gap-2">
           <button
             type="button"

@@ -3,7 +3,7 @@ from typing import Literal
 
 from arq import create_pool
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,7 @@ from app.models.question_favorite import QuestionFavorite
 from app.models.quiz_rating import QuizRating
 from app.models.quiz_set import QuizSet
 from app.models.user import User
-from app.schemas.quiz import GenerateQuizIn, QuestionUpdateIn, QuizUpdateIn, RatingIn
+from app.schemas.quiz import GenerateQuizIn, QuestionUpdateIn, QuizBlueprint, QuizUpdateIn, RatingIn, RetryQuizIn
 from app.services.blueprint import subject_tags_for, validate_type_counts
 from app.services.distractor_engine import build_choice_question
 from app.services.quality_gates import apply_gates, choice_structure_valid, is_practice_eligible
@@ -65,15 +65,46 @@ def _q_out(q: Question) -> dict:
     }
 
 
-async def _discard_quiz(db: AsyncSession, quiz: QuizSet, job: GenerationJob | None = None) -> None:
-    if job is not None:
-        job.quiz_set_id = None
-    elif quiz.generation_job_id:
-        linked = await db.get(GenerationJob, quiz.generation_job_id)
-        if linked:
-            linked.quiz_set_id = None
-    quiz.generation_job_id = None
-    await db.delete(quiz)
+def _validate_generation_blueprint(blueprint: QuizBlueprint, subject: str) -> None:
+    if blueprint.enable_web_search and not settings.web_search_available:
+        raise AppError("未填写 Tavily Key，联网补充不可用；普通出题不受影响", code=503, status_code=503)
+    if blueprint.allocation_mode == "manual":
+        try:
+            validate_type_counts(
+                blueprint.type_counts,
+                blueprint.subject_tags or subject_tags_for(subject),
+            )
+        except ValueError as exc:
+            raise AppError(str(exc), code=400) from exc
+
+
+async def _enqueue_generation(
+    db: AsyncSession,
+    background: BackgroundTasks,
+    user: User,
+    job: GenerationJob,
+    quiz: QuizSet,
+) -> None:
+    local_fallback = settings.is_local_stack
+    if not local_fallback:
+        try:
+            pool = await create_pool(redis_settings())
+            await pool.enqueue_job("generate_quiz_job", job.id)
+            await pool.aclose()
+        except Exception as exc:
+            job.status = "failed"
+            job.error = "任务队列暂不可用"
+            quiz.status = "failed"
+            await db.commit()
+            raise AppError(
+                "任务队列暂不可用，请稍后重试",
+                code=503,
+                status_code=503,
+                data={"job_id": job.id, "quiz_id": quiz.id},
+            ) from exc
+    await incr_quota(user.id, user.daily_gen_quota)
+    if local_fallback:
+        background.add_task(_run_generation_job, job.id)
 
 
 def _source_passage(doc: Document | None, question: Question) -> str:
@@ -130,28 +161,12 @@ async def generate(
     db: AsyncSession = Depends(get_db),
 ):
     await assert_quota(user.id, user.daily_gen_quota)
-    if body.blueprint.enable_web_search and not settings.web_search_available:
-        raise AppError("未填写 Tavily Key，联网补充不可用；普通出题不受影响", code=503, status_code=503)
-    if body.blueprint.allocation_mode == "manual":
-        try:
-            validate_type_counts(
-                body.blueprint.type_counts,
-                body.blueprint.subject_tags or subject_tags_for(body.subject),
-            )
-        except ValueError as exc:
-            raise AppError(str(exc), code=400) from exc
+    _validate_generation_blueprint(body.blueprint, body.subject)
     doc = await db.get(Document, body.document_id)
     if not doc or doc.owner_id != user.id:
         raise AppError("文档不存在", code=404, status_code=404)
     existing_titles = list(
-        (
-            await db.execute(
-                select(QuizSet.title).where(
-                    QuizSet.creator_id == user.id,
-                    QuizSet.status != "failed",
-                )
-            )
-        ).scalars().all()
+        (await db.execute(select(QuizSet.title).where(QuizSet.creator_id == user.id))).scalars().all()
     )
     resolved_title = uniquify_title(body.title, existing_titles)
     job_config = body.model_dump()
@@ -180,25 +195,90 @@ async def generate(
     await db.flush()
     job.quiz_set_id = quiz.id
     await db.commit()
-    job_id = job.id
-    quiz_id = quiz.id
+    await _enqueue_generation(db, background, user, job, quiz)
+    return ok({"job_id": job.id, "quiz_id": quiz.id})
 
-    local_fallback = settings.is_local_stack
-    if not local_fallback:
-        try:
-            pool = await create_pool(redis_settings())
-            await pool.enqueue_job("generate_quiz_job", job_id)
-            await pool.aclose()
-        except Exception as exc:
-            job.status = "failed"
-            job.error = "任务队列暂不可用"
-            await _discard_quiz(db, quiz, job)
-            await db.commit()
-            raise AppError("任务队列暂不可用，请稍后重试", code=503, status_code=503) from exc
-    await incr_quota(user.id, user.daily_gen_quota)
-    if local_fallback:
-        background.add_task(_run_generation_job, job_id)
-    return ok({"job_id": job_id, "quiz_id": quiz_id})
+
+def _retry_job_config(quiz: QuizSet, prev: GenerationJob | None, body: RetryQuizIn) -> dict:
+    config = dict(prev.config) if prev and isinstance(prev.config, dict) else {}
+    config.setdefault("title", quiz.title)
+    config.setdefault("category", quiz.category)
+    config.setdefault("subject", quiz.subject or "auto")
+    config.setdefault("visibility", quiz.visibility)
+    config.setdefault("blueprint", quiz.blueprint or {})
+    config.setdefault("force", False)
+    config["document_id"] = quiz.document_id
+    if body.title is not None:
+        config["title"] = body.title
+    if body.category is not None:
+        config["category"] = body.category
+    if body.subject is not None:
+        config["subject"] = body.subject
+    if body.visibility is not None:
+        config["visibility"] = body.visibility
+    if body.blueprint is not None:
+        config["blueprint"] = body.blueprint.model_dump()
+    if body.force is not None:
+        config["force"] = body.force
+    return config
+
+
+@router.post("/{quiz_id}/retry")
+async def retry_generate(
+    quiz_id: str,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    body: RetryQuizIn | None = None,
+):
+    quiz = await db.get(QuizSet, quiz_id)
+    if not quiz or quiz.creator_id != user.id:
+        raise AppError("题库不存在", code=404, status_code=404)
+    if quiz.status != "failed":
+        raise AppError("仅失败草稿可重试", code=400)
+    if not quiz.document_id:
+        raise AppError("文档不存在", code=404, status_code=404)
+    doc = await db.get(Document, quiz.document_id)
+    if not doc or doc.owner_id != user.id:
+        raise AppError("文档不存在", code=404, status_code=404)
+    await assert_quota(user.id, user.daily_gen_quota)
+    payload = body or RetryQuizIn()
+    if payload.blueprint is not None:
+        _validate_generation_blueprint(payload.blueprint, payload.subject or quiz.subject)
+    prev = await db.get(GenerationJob, quiz.generation_job_id) if quiz.generation_job_id else None
+    job_config = _retry_job_config(quiz, prev, payload)
+    if payload.title is not None:
+        existing_titles = list(
+            (
+                await db.execute(
+                    select(QuizSet.title).where(QuizSet.creator_id == user.id, QuizSet.id != quiz.id)
+                )
+            ).scalars().all()
+        )
+        job_config["title"] = uniquify_title(payload.title, existing_titles)
+    quiz.title = job_config["title"]
+    quiz.category = job_config.get("category") or quiz.category
+    subject = job_config.get("subject") or quiz.subject
+    quiz.subject = "general" if subject == "auto" else subject
+    quiz.visibility = job_config.get("visibility") or quiz.visibility
+    quiz.blueprint = job_config.get("blueprint") or quiz.blueprint
+    await db.execute(delete(Question).where(Question.quiz_set_id == quiz.id))
+    quiz.question_count = 0
+    job = GenerationJob(
+        user_id=user.id,
+        document_id=doc.id,
+        status="queued",
+        stage="queued",
+        config=job_config,
+    )
+    db.add(job)
+    await db.flush()
+    job.quiz_set_id = quiz.id
+    quiz.generation_job_id = job.id
+    quiz.status = "generating"
+    await db.commit()
+    await _enqueue_generation(db, background, user, job, quiz)
+    return ok({"job_id": job.id, "quiz_id": quiz.id})
 
 
 async def _favorited_quiz_ids(db: AsyncSession, user_id: str, quiz_ids: list[str]) -> set[str]:
@@ -240,10 +320,9 @@ async def my_quizzes(
         .order_by(QuizSet.created_at.desc())
     )
     quizzes = list(rows.scalars().all())
-    visible = [q for q in quizzes if q.status != "failed"]
-    fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
-    counts = await _question_counts(db, [q.id for q in visible])
-    return ok([_quiz_out(q, {"favorited": q.id in fav_ids, "question_count": counts.get(q.id, 0)}) for q in visible])
+    fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in quizzes])
+    counts = await _question_counts(db, [q.id for q in quizzes])
+    return ok([_quiz_out(q, {"favorited": q.id in fav_ids, "question_count": counts.get(q.id, 0)}) for q in quizzes])
 
 
 
@@ -496,8 +575,10 @@ async def harden_question(
         "source_quote": span.get("quote"),
     }
     try:
-        rebuilt = await build_choice_question(stem, passage, q.source_chunk_id or "")
-        rebuilt = await apply_gates(rebuilt, passage)
+        rebuilt = await build_choice_question(
+            stem, passage, q.source_chunk_id or "", subject=quiz.subject
+        )
+        rebuilt = await apply_gates(rebuilt, passage, subject=quiz.subject)
     except AppError:
         raise
     except Exception as exc:

@@ -13,6 +13,11 @@ describe("generate button lock", () => {
     assert.equal(isGenerateSubmitLocked(false, "failed"), false);
     assert.equal(isJobInFlight("failed"), false);
     assert.equal(generateSubmitLabel({ busy: false, jobStatus: null, hasPreview: true }), "开始生成");
+    assert.equal(
+      generateSubmitLabel({ busy: false, jobStatus: "failed", hasPreview: true, canRetry: true }),
+      "用同一文档重试",
+    );
+    assert.equal(generateSubmitLabel({ busy: false, jobStatus: "failed", hasPreview: true }), "开始生成");
   });
 
   it("shows 提交中… only while the HTTP submit is in flight", () => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, getToken } from "@/lib/api";
+import { api, generationIdsFromError, getToken } from "@/lib/api";
 import { generateSubmitLabel, isGenerateSubmitLocked, isJobInFlight } from "@/lib/generate-button";
 import { isUnnamedTitle, nextUnnamedTitle, withDuplicateSuffix } from "@/lib/quiz-title";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -96,6 +96,8 @@ export default function UploadPage() {
   const manualCountTotal = useMemo(() => countTotal(typeCounts), [typeCounts]);
   const jobInFlight = isJobInFlight(job?.status);
   const submitLocked = isGenerateSubmitLocked(busy, job?.status);
+  const retryQuizId = job?.status === "failed" ? job.quiz_set_id : undefined;
+  const canRetry = Boolean(retryQuizId);
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
@@ -178,25 +180,68 @@ export default function UploadPage() {
     setTypeCounts((current) => ({ ...current, [kind]: count }));
   }
 
+  function rememberFailedDraft(error: unknown) {
+    const ids = generationIdsFromError(error);
+    if (!ids) return;
+    setJob({
+      id: ids.job_id,
+      status: "failed",
+      progress: 0,
+      stage: "失败",
+      error: error instanceof Error ? error.message : "生成失败",
+      quiz_set_id: ids.quiz_id,
+    });
+  }
+
   async function requestGenerate(id: string, finalTitle: string) {
     if (allocationMode === "manual" && manualCountTotal !== total) {
       return;
     }
     const selection = selectionRef.current;
-    const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
-      method: "POST",
-      body: JSON.stringify({
-        document_id: id,
-        title: finalTitle,
-        category,
-        subject,
-        visibility,
-        blueprint: blueprint(),
-        force,
-      }),
-    });
-    if (selection !== selectionRef.current) return;
-    setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+    try {
+      const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          document_id: id,
+          title: finalTitle,
+          category,
+          subject,
+          visibility,
+          blueprint: blueprint(),
+          force,
+        }),
+      });
+      if (selection !== selectionRef.current) return;
+      setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+    } catch (error) {
+      rememberFailedDraft(error);
+      throw error;
+    }
+  }
+
+  async function requestRetry(quizId: string, finalTitle: string) {
+    if (allocationMode === "manual" && manualCountTotal !== total) {
+      return;
+    }
+    const selection = selectionRef.current;
+    try {
+      const gen = await api<{ job_id: string; quiz_id: string }>(`/quizzes/${quizId}/retry`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: finalTitle,
+          category,
+          subject,
+          visibility,
+          blueprint: blueprint(),
+          force,
+        }),
+      });
+      if (selection !== selectionRef.current) return;
+      setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+    } catch (error) {
+      rememberFailedDraft(error);
+      throw error;
+    }
   }
 
   async function submitGenerate(uploadFile: File, finalTitle: string) {
@@ -211,13 +256,18 @@ export default function UploadPage() {
   }
 
   async function start() {
-    if (!file || submitLockRef.current || jobInFlight) return;
+    if (submitLockRef.current || jobInFlight) return;
+    if (!canRetry && !file) return;
     submitLockRef.current = true;
     setErr("");
     setNotice("");
     setBusy(true);
     try {
       const trimmed = title.trim();
+      if (retryQuizId) {
+        await requestRetry(retryQuizId, trimmed || "未命名题库");
+        return;
+      }
       const autoTitle = !titleTouchedRef.current || isUnnamedTitle(trimmed);
       const titlesPromise = fetchQuizTitles()
         .then((titles) => {
@@ -232,7 +282,7 @@ export default function UploadPage() {
         setDupPrompt({ requested: trimmed, resolved: withDuplicateSuffix(trimmed, existingTitles) });
         return;
       }
-      await submitGenerate(file, finalTitle);
+      await submitGenerate(file!, finalTitle);
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "上传失败");
     } finally {
@@ -270,7 +320,11 @@ export default function UploadPage() {
               ? "当前为演示模式，不调用网络模型。"
               : `已配置${[setup.qwen_configured ? "通义千问" : null, setup.deepseek_configured ? "DeepSeek" : null]
                   .filter(Boolean)
-                  .join("、") || "出题服务"}。`}
+                  .join("、") || "出题服务"}。${
+                  setup.self_review
+                    ? " 仅一把 Key，干扰项与门控将换模型/温度自审（自审降级）。"
+                    : " 题干走一家，干扰项与门控走另一家。"
+                }`}
             {setup.tavily_configured ? " 联网补充可用。" : " 未填写 Tavily Key，不影响普通出题。"}
             <Link href="/settings" className="ml-1 text-brand-700">
               去设置
@@ -477,11 +531,16 @@ export default function UploadPage() {
         <button
           type="button"
           className="btn-primary w-full"
-          disabled={!file || submitLocked || (allocationMode === "manual" && manualCountTotal !== total)}
+          disabled={(!file && !canRetry) || submitLocked || (allocationMode === "manual" && manualCountTotal !== total)}
           aria-busy={submitLocked || undefined}
           onClick={start}
         >
-          {generateSubmitLabel({ busy, jobStatus: job?.status, hasPreview: Boolean(documentId && preview) })}
+          {generateSubmitLabel({
+            busy,
+            jobStatus: job?.status,
+            hasPreview: Boolean(documentId && preview),
+            canRetry,
+          })}
         </button>
       </div>
       <div className="card p-4 sm:p-6">
@@ -498,7 +557,16 @@ export default function UploadPage() {
             {job.models_used && (
               <div className="space-y-1 text-xs text-slate-500">
                 <p>
-                  出题 {job.models_used.generator} / 干扰项 {job.models_used.critic} / 科目 {job.models_used.subject}
+                  出题 {job.models_used.generator}
+                  {typeof job.models_used.generator_model === "string" && job.models_used.generator_model
+                    ? `（${job.models_used.generator_model}）`
+                    : ""}
+                  {" / "}干扰项 {job.models_used.critic}
+                  {typeof job.models_used.critic_model === "string" && job.models_used.critic_model
+                    ? `（${job.models_used.critic_model}）`
+                    : ""}
+                  {" / "}科目 {job.models_used.subject}
+                  {job.models_used.self_review === "true" ? " · 自审降级" : ""}
                 </p>
                 {typeof job.models_used.shortfall_reason === "string" && <p>{job.models_used.shortfall_reason}</p>}
               </div>

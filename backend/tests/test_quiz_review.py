@@ -323,7 +323,7 @@ async def test_harden_uses_full_mapped_passage(client, session_factory, monkeypa
 
     captured: list[str] = []
 
-    async def _build(_stem, passage, _chunk_id):
+    async def _build(_stem, passage, _chunk_id, **_kwargs):
         captured.append(passage)
         return {
             "options": None,
@@ -333,7 +333,7 @@ async def test_harden_uses_full_mapped_passage(client, session_factory, monkeypa
             "needs_review": True,
         }
 
-    async def _gates(question, _passage):
+    async def _gates(question, _passage, **_kwargs):
         return question
 
     monkeypatch.setattr("app.api.quizzes.build_choice_question", _build)

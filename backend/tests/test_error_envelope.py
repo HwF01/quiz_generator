@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError, TimeoutError as SATimeoutError
 from starlette.requests import Request
 
-from app.core.exceptions import AppError, unhandled_error_handler
+from app.core.exceptions import AppError, app_error_handler, unhandled_error_handler
 from app.main import app
 from app.models.document import Document
 from app.models.question import Question
@@ -41,6 +41,19 @@ async def test_unhandled_error_handler_json_body():
     assert res.body
     body = json.loads(res.body)
     assert body == {"code": 500, "data": None, "message": "服务器繁忙，请稍后重试"}
+
+
+async def test_app_error_handler_includes_optional_data():
+    res = await app_error_handler(
+        _dummy_request(),
+        AppError("任务队列暂不可用，请稍后重试", code=503, status_code=503, data={"job_id": "j", "quiz_id": "q"}),
+    )
+    assert res.status_code == 503
+    assert json.loads(res.body) == {
+        "code": 503,
+        "data": {"job_id": "j", "quiz_id": "q"},
+        "message": "任务队列暂不可用，请稍后重试",
+    }
 
 
 async def test_unhandled_error_returns_json_envelope(client: AsyncClient):
@@ -84,7 +97,7 @@ async def test_upload_storage_failure_is_json(client: AsyncClient, monkeypatch):
     assert body["message"] == "文件保存失败，请稍后重试"
 
 
-async def test_list_quizzes_skips_failed_without_write(client: AsyncClient, session_factory):
+async def test_list_quizzes_includes_failed_drafts_without_deleting(client: AsyncClient, session_factory):
     data = await register(client, "failedlist@example.com")
     token = data["token"]
     me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -110,7 +123,8 @@ async def test_list_quizzes_skips_failed_without_write(client: AsyncClient, sess
     res = await client.get("/api/quizzes", headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     titles = [q["title"] for q in res.json()["data"]]
-    assert titles == ["好的"]
+    assert set(titles) == {"坏的", "好的"}
+    assert len(titles) == 2
     async with session_factory() as db:
         rows = (
             await db.execute(select(QuizSet.title).where(QuizSet.creator_id == user_id))

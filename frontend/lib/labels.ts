@@ -28,6 +28,7 @@ export type SetupStatus = {
   deepseek_configured: boolean;
   tavily_configured: boolean;
   editable: boolean;
+  self_review: boolean;
 };
 
 export function safeNextPath(raw: string | null): string {

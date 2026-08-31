@@ -20,7 +20,7 @@ from app.services.progress import set_progress
 from app.services.quality_gates import apply_gates
 from app.services.quiz_generator import extract_key_items, generate_stem
 from app.services.quota import decr_quota
-from app.services.llm.router import critic_provider, generator_provider
+from app.services.llm.router import assign_roles
 from app.services.subjective_grading import build_grading_rubric
 from app.services.web_search import search_related_knowledge, topic_queries
 
@@ -147,8 +147,8 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
             subject_tags=resolved_tags,
             suggested_types=suggested_types,
         )
-        gen = generator_provider(subject)
-        cri = critic_provider()
+        roles = assign_roles(subject)
+        gen, cri = roles.generator, roles.critic
         job.models_used = {
             "generator": getattr(gen, "name", "generator"),
             "generator_model": getattr(gen, "model", ""),
@@ -156,6 +156,7 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
             "critic_model": getattr(cri, "model", ""),
             "subject": subject,
             "subject_tags": resolved_tags,
+            "self_review": "true" if roles.self_review else "false",
         }
         if len(key_items) < target:
             job.models_used["shortfall_reason"] = "可溯源关键句不足，已按质量优先减少题量"
@@ -183,7 +184,7 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
                 if stem.get("_generation_error"):
                     logger.warning("skip incomplete stem job=%s item=%s", job_id, i)
                     return None
-                q = await build_choice_question(stem, passage, item["chunk_id"])
+                q = await build_choice_question(stem, passage, item["chunk_id"], subject=subject)
                 source_ids = set(stem.get("external_source_ids") or [])
                 known_ids = {source["id"] for source in external_sources}
                 if source_ids - known_ids:
@@ -199,8 +200,10 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
                     for source in external_sources
                     if source["id"] in source_ids
                 ]
-                q = await build_grading_rubric(q, passage)
-                return await apply_gates(q, passage, subject_tags=resolved_tags)
+                q = await build_grading_rubric(q, passage, subject=subject)
+                return await apply_gates(
+                    q, passage, subject_tags=resolved_tags, subject=subject
+                )
 
         built = await asyncio.gather(
             *[_build_one(i, item, alloc) for i, (item, alloc) in enumerate(zip(key_items, allocs))]
@@ -263,9 +266,7 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         job.error = str(exc)
         job.status = "failed"
         if quiz:
-            job.quiz_set_id = None
-            quiz.generation_job_id = None
-            await db.delete(quiz)
+            quiz.status = "failed"
         await db.commit()
         try:
             await decr_quota(job.user_id)

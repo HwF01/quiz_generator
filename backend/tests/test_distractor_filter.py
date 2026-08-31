@@ -177,7 +177,7 @@ async def test_single_choice_ignores_extra_correct_texts(monkeypatch):
     async def _validate(candidates, **_kwargs):
         return candidates, False
 
-    async def _identity(question, _passage):
+    async def _identity(question, _passage, **_kwargs):
         return question
 
     monkeypatch.setattr("app.services.distractor_engine.overgenerate", _overgenerate)
@@ -219,7 +219,7 @@ async def test_multi_choice_packs_two_correct_keys(monkeypatch):
     async def _validate(candidates, **_kwargs):
         return candidates, False
 
-    async def _identity(question, _passage):
+    async def _identity(question, _passage, **_kwargs):
         return question
 
     monkeypatch.setattr("app.services.distractor_engine.overgenerate", _overgenerate)

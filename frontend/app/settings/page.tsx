@@ -93,7 +93,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold">服务配置</h1>
         <p className="mt-1 text-sm text-slate-500">
-          出题至少需要一把通义千问或 DeepSeek Key，两把都配时文科走通义、理科走 DeepSeek。Tavily 仅联网补充时需要，可留空。
+          出题至少需要一把通义千问或 DeepSeek Key。两把都配时题干走一家、干扰项与门控走另一家（文科题干偏通义、理科偏 DeepSeek）。仅一把 Key 时会换模型/温度自审，界面标明「自审降级」。Tavily 仅联网补充时需要，可留空。
         </p>
       </div>
       {status && (
@@ -102,7 +102,9 @@ export default function SettingsPage() {
           <p className="text-sm text-slate-600">
             {status.llm_mode === "mock"
               ? "演示模式：不调用网络模型。"
-              : `真实出题：已配置 ${providers.join("、") || "出题服务"}。`}
+              : status.self_review
+                ? `真实出题：已配置 ${providers.join("、") || "出题服务"}。仅一把 Key，干扰项与门控将自审降级。`
+                : `真实出题：已配置 ${providers.join("、") || "出题服务"}。题干走一家，干扰项与门控走另一家。`}
           </p>
           <p className="text-sm text-slate-600">
             {status.tavily_configured

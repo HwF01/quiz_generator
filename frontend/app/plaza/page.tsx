@@ -19,22 +19,44 @@ type Item = {
   favorited: boolean;
 };
 
+type PlazaPage = {
+  items: Item[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+type CategoryRow = {
+  category: string;
+  count: number;
+};
+
+const PAGE_SIZE = 20;
+
 export default function PlazaPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("hot");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
 
-  async function load(opts?: { silent?: boolean }) {
+  async function load(opts?: { silent?: boolean; page?: number }) {
+    const currentPage = opts?.page ?? page;
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (category) params.set("category", category);
     params.set("sort", sort);
+    params.set("page", String(currentPage));
+    params.set("page_size", String(PAGE_SIZE));
     if (!opts?.silent) setLoading(true);
     try {
-      setItems(await api<Item[]>(`/plaza?${params.toString()}`));
+      const data = await api<PlazaPage>(`/plaza?${params.toString()}`);
+      setItems(data.items);
+      setTotal(data.total);
       setLoaded(true);
     } finally {
       if (!opts?.silent) setLoading(false);
@@ -42,8 +64,28 @@ export default function PlazaPage() {
   }
 
   useEffect(() => {
-    load();
-  }, [category, sort]);
+    void api<CategoryRow[]>("/plaza/categories")
+      .then((rows) => setCategories(rows.filter((row) => row.category)))
+      .catch(() => setCategories([]));
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [category, sort, page]);
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  function goToPage(next: number) {
+    setPage(Math.min(pageCount, Math.max(1, next)));
+  }
+
+  function resetToFirstPage() {
+    if (page === 1) {
+      void load({ page: 1 });
+      return;
+    }
+    setPage(1);
+  }
 
   return (
     <div className="space-y-6">
@@ -57,18 +99,34 @@ export default function PlazaPage() {
           placeholder="搜索标题"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && load()}
+          onKeyDown={(e) => e.key === "Enter" && resetToFirstPage()}
         />
-        <button type="button" className="btn-ghost" onClick={() => void load()}>
+        <button type="button" className="btn-ghost" onClick={() => resetToFirstPage()}>
           搜索
         </button>
-        <select className="input w-full sm:w-auto" value={category} onChange={(e) => setCategory(e.target.value)}>
+        <select
+          className="input w-full sm:w-auto"
+          value={category}
+          onChange={(e) => {
+            setCategory(e.target.value);
+            setPage(1);
+          }}
+        >
           <option value="">全部分类</option>
-          {["常识", "考公", "考研", "IT", "历史", "自定义"].map((c) => (
-            <option key={c}>{c}</option>
+          {categories.map((row) => (
+            <option key={row.category} value={row.category}>
+              {row.category}（{row.count}）
+            </option>
           ))}
         </select>
-        <select className="input w-full sm:w-auto" value={sort} onChange={(e) => setSort(e.target.value)}>
+        <select
+          className="input w-full sm:w-auto"
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value);
+            setPage(1);
+          }}
+        >
           <option value="hot">热门</option>
           <option value="new">最新</option>
         </select>
@@ -117,6 +175,31 @@ export default function PlazaPage() {
           <p className="text-sm text-slate-500 md:col-span-2">没有符合条件的公开题库。换个关键词，或去上传一份文档出题。</p>
         )}
       </div>
+      )}
+      {loaded && total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-500">
+            第 {page} / {pageCount} 页，共 {total} 套题库
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={page <= 1}
+              onClick={() => goToPage(page - 1)}
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={page >= pageCount}
+              onClick={() => goToPage(page + 1)}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

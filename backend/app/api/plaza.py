@@ -16,42 +16,54 @@ from app.services.retrieval import SQARetrieval
 router = APIRouter(prefix="/plaza", tags=["plaza"])
 
 
+def _plaza_visible():
+    return (
+        or_(QuizSet.visibility == "public", QuizSet.is_builtin.is_(True)),
+        QuizSet.status == "ready",
+    )
+
+
 @router.get("")
 async def plaza(
     q: str | None = None,
     category: str | None = None,
     sort: str = "hot",
     builtin: bool | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=50),
     user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(QuizSet).where(
-        or_(QuizSet.visibility == "public", QuizSet.is_builtin.is_(True)),
-        QuizSet.status == "ready",
-    )
+    filters = [*_plaza_visible()]
     if category:
-        stmt = stmt.where(QuizSet.category == category)
+        filters.append(QuizSet.category == category)
     if builtin is True:
-        stmt = stmt.where(QuizSet.is_builtin.is_(True))
+        filters.append(QuizSet.is_builtin.is_(True))
     if builtin is False:
-        stmt = stmt.where(QuizSet.is_builtin.is_(False))
+        filters.append(QuizSet.is_builtin.is_(False))
     if q:
         like = f"%{q}%"
-        stmt = stmt.where(or_(QuizSet.title.ilike(like), QuizSet.description.ilike(like)))
-    if sort == "new":
-        stmt = stmt.order_by(QuizSet.created_at.desc())
+        filters.append(or_(QuizSet.title.ilike(like), QuizSet.description.ilike(like)))
+    total = int(await db.scalar(select(func.count(QuizSet.id)).where(*filters)) or 0)
+    stmt = select(QuizSet).where(*filters)
+    offset = (page - 1) * page_size
+    if q:
+        rows = list((await db.execute(stmt)).scalars().all())
+        if rows:
+            docs = [
+                {"id": z.id, "text": f"{z.title} {z.description or ''} {z.category}"}
+                for z in rows
+            ]
+            ranked_ids = await asyncio.to_thread(_plaza_rank_ids, docs, q)
+            by_id = {z.id: z for z in rows}
+            rows = [by_id[qid] for qid in ranked_ids if qid in by_id]
+        rows = rows[offset : offset + page_size]
     else:
-        stmt = stmt.order_by(QuizSet.plays.desc(), QuizSet.likes.desc())
-    rows = (await db.execute(stmt.limit(50))).scalars().all()
-
-    if q and rows:
-        docs = [
-            {"id": z.id, "text": f"{z.title} {z.description or ''} {z.category}"}
-            for z in rows
-        ]
-        ranked_ids = await asyncio.to_thread(_plaza_rank_ids, docs, q)
-        order = {i: n for n, i in enumerate(ranked_ids)}
-        rows = sorted(rows, key=lambda z: order.get(z.id, 999))
+        if sort == "new":
+            stmt = stmt.order_by(QuizSet.created_at.desc())
+        else:
+            stmt = stmt.order_by(QuizSet.plays.desc(), QuizSet.likes.desc())
+        rows = (await db.execute(stmt.offset(offset).limit(page_size))).scalars().all()
 
     fav_ids = set()
     if user:
@@ -83,7 +95,7 @@ async def plaza(
                 "favorited": z.id in fav_ids,
             }
         )
-    return ok(out)
+    return ok({"items": out, "total": total, "page": page, "page_size": page_size})
 
 
 def _plaza_rank_ids(docs: list[dict], query: str) -> list[str]:
@@ -94,7 +106,7 @@ def _plaza_rank_ids(docs: list[dict], query: str) -> list[str]:
 async def categories(db: AsyncSession = Depends(get_db)):
     rows = await db.execute(
         select(QuizSet.category, func.count())
-        .where(or_(QuizSet.visibility == "public", QuizSet.is_builtin.is_(True)))
+        .where(*_plaza_visible())
         .group_by(QuizSet.category)
     )
     return ok([{"category": c, "count": n} for c, n in rows.all()])

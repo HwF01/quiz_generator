@@ -43,11 +43,19 @@ async def _post_with_retry(url: str, **kwargs) -> httpx.Response:
 class OpenAICompatibleProvider:
     name = "openai-compatible"
 
-    def __init__(self, api_key: str, base_url: str, model: str, name: str):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        name: str,
+        temperature_delta: float = 0.0,
+    ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.name = name
+        self.temperature_delta = temperature_delta
 
     async def complete(
         self,
@@ -98,9 +106,10 @@ class OpenAICompatibleProvider:
 class AnthropicProvider:
     name = "claude"
 
-    def __init__(self):
+    def __init__(self, model: str | None = None, temperature_delta: float = 0.0):
         self.api_key = settings.anthropic_api_key
-        self.model = settings.anthropic_model
+        self.model = model or settings.anthropic_model
+        self.temperature_delta = temperature_delta
 
     async def complete(
         self,
@@ -141,6 +150,7 @@ class AnthropicProvider:
 class MockProvider:
     name = "mock"
     model = "mock-local"
+    temperature_delta = 0.0
 
     async def complete(
         self,
