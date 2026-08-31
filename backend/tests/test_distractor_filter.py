@@ -8,14 +8,14 @@ from app.services.distractor_engine import (
 )
 
 
-def test_filter_drops_near_duplicate_of_answer():
+async def test_filter_drops_near_duplicate_of_answer():
     cands = [
         {"text": "叶绿体"},
         {"text": "线粒体"},
         {"text": "核糖体"},
         {"text": "高尔基体"},
     ]
-    kept = filter_candidates(
+    kept = await filter_candidates(
         cands,
         answer="叶绿体",
         stem="光合作用主要发生在？",
@@ -26,14 +26,55 @@ def test_filter_drops_near_duplicate_of_answer():
     assert len(texts) >= 2
 
 
-def test_filter_drops_off_topic():
-    kept = filter_candidates(
+async def test_filter_drops_off_topic():
+    kept = await filter_candidates(
         [{"text": "完全无关的宇宙飞船编号XYZ"}],
         answer="叶绿体",
         stem="光合作用",
         passage="光合作用发生在叶绿体中",
     )
     assert kept == [] or all("叶绿体" not in c["text"] for c in kept)
+
+
+async def test_filter_dashscope_drops_answer_near_dup_and_offtopic(monkeypatch):
+    import numpy as np
+
+    from app.services.llm.embed import DASHSCOPE_BACKEND
+
+    def unit(*xs: float) -> np.ndarray:
+        arr = np.array(xs, dtype=np.float32)
+        return arr / np.linalg.norm(arr)
+
+    catalog = {
+        "叶绿体": unit(1.0, 0.0),
+        "叶绿体中": unit(0.99, 0.14),
+        "线粒体": unit(0.55, 0.84),
+        "完全无关的宇宙飞船编号XYZ": unit(-0.8, 0.2),
+        "context": unit(0.6, 0.8),
+    }
+
+    async def fake_embed(texts: list[str]):
+        out = []
+        for text in texts:
+            if text in catalog:
+                out.append(catalog[text])
+            else:
+                out.append(catalog["context"])
+        return out, DASHSCOPE_BACKEND
+
+    monkeypatch.setattr("app.services.distractor_engine.embed_texts", fake_embed)
+    kept = await filter_candidates(
+        [
+            {"text": "叶绿体中"},
+            {"text": "线粒体"},
+            {"text": "完全无关的宇宙飞船编号XYZ"},
+        ],
+        answer="叶绿体",
+        stem="光合作用主要发生在？",
+        passage="光合作用发生在叶绿体中。线粒体进行呼吸作用。",
+    )
+    texts = [c["text"] for c in kept]
+    assert texts == ["线粒体"]
 
 
 @pytest.mark.asyncio
