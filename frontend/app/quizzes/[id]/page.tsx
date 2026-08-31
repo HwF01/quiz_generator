@@ -9,7 +9,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel, quizStatusLabel } from "@/lib/labels";
-import { isQuizInFlight } from "@/lib/quiz-status";
+import { isQuizWaitingForQuestions } from "@/lib/quiz-status";
 
 type Question = {
   id: string;
@@ -118,7 +118,8 @@ export default function QuizEditPage() {
   const [hardeningId, setHardeningId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
   const [job, setJob] = useState<Job | null>(null);
-  const inFlight = Boolean(quiz && isQuizInFlight(quiz.status) && quiz.questions.length === 0);
+  const [generationFailed, setGenerationFailed] = useState(false);
+  const inFlight = Boolean(!generationFailed && quiz && isQuizWaitingForQuestions(quiz));
 
   async function load() {
     const data = await api<Quiz>(`/quizzes/${id}?purpose=review`);
@@ -128,12 +129,18 @@ export default function QuizEditPage() {
   }
 
   useEffect(() => {
+    setGenerationFailed(false);
     load().catch((e) => setLoadError(e instanceof Error ? e.message : "加载失败"));
   }, [id]);
 
   useEffect(() => {
     if (!inFlight) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    function stopPolling() {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    }
     async function tick() {
       try {
         const data = await load();
@@ -147,25 +154,30 @@ export default function QuizEditPage() {
           await load();
         }
         if (next.status === "failed") {
+          stopPolling();
+          setGenerationFailed(true);
           setLoadError(next.error || "生成失败");
+          setQuiz(null);
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : "";
         if (message.includes("不存在")) {
+          stopPolling();
           setLoadError(message || "题库不存在");
+          setQuiz(null);
         }
       }
     }
     void tick();
-    const timer = setInterval(() => void tick(), 1500);
+    timer = setInterval(() => void tick(), 1500);
     return () => {
-      cancelled = true;
-      clearInterval(timer);
+      stopPolling();
     };
   }, [id, inFlight]);
 
   useEffect(() => {
     function refresh() {
+      if (generationFailed) return;
       if (document.visibilityState && document.visibilityState !== "visible") return;
       load().catch(() => {
         /* ignore transient errors on focus */
@@ -177,7 +189,7 @@ export default function QuizEditPage() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [id]);
+  }, [id, generationFailed]);
 
   const sorted = useMemo(() => {
     if (!quiz) return [];

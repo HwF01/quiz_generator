@@ -8,7 +8,7 @@ import { PlayDetailDialog, type PlayDetail } from "@/components/PlayDetailDialog
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { quizStatusLabel } from "@/lib/labels";
-import { isQuizInFlight, quizQuestionCountLabel } from "@/lib/quiz-status";
+import { isQuizWaitingForQuestions, quizQuestionCountLabel } from "@/lib/quiz-status";
 
 type Quiz = {
   id: string;
@@ -74,7 +74,7 @@ export default function ProfilePage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const hasInflight = quizzes.some((q) => isQuizInFlight(q.status));
+  const hasInflight = quizzes.some((q) => isQuizWaitingForQuestions(q));
 
   useEffect(() => {
     if (!getToken()) {
