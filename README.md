@@ -65,7 +65,7 @@ npm run dev
 ```
 
 - SQLite 启动时 `create_all` + seed，**不跑 Alembic**
-- `APP_ENV=local` / `desktop` 时出题走 `asyncio.create_task`，不依赖 ARQ worker
+- `APP_ENV=local` / `desktop`（或 SQLite 本机栈）时出题走 FastAPI `BackgroundTasks` 调 `_run_generation_job`，不依赖 ARQ worker
 - `REDIS_URL=memory://`（或留空 scheme 为 memory）使用进程内缓存，**不必再装 Redis**
 - `MOCK_LLM=true` 才强制 mock；有 Key 且 `MOCK_LLM=false` 走真模型
 
@@ -87,13 +87,13 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up --build
 ```
 
-Postgres 路径用 Alembic：`alembic upgrade head`（含题目小问、外部来源与 AI 批改记录迁移）。
+Postgres 路径用 Alembic：`alembic upgrade head`（当前 head 为 `006_list_query_indexes`，含收藏、题目小问、外部来源与 AI 批改记录等）。
 
 ## 已核对的配置缺口
 
 | 项 | 说明 |
 | --- | --- |
-| 本机 SQLite vs Docker Alembic | 本机 `create_all` 吃 ORM `ondelete`；Docker/Postgres 必须跑 002 |
+| 本机 SQLite vs Docker Alembic | 本机 `create_all` 吃 ORM `ondelete`；Docker/Postgres 必须 `alembic upgrade head`（不要停在 002） |
 | 配额与 Redis | 真实 Redis 仍 fail-closed（挂了会 503）；`memory://` 视为可用，重启后当日配额重置 |
 | `SECRET_KEY` | 非 development/local/desktop 且仍是占位则拒绝启动 |
 | Embedding | 名称 `hashed-bigram`，不是真实 bge |

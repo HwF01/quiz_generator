@@ -1,6 +1,6 @@
 # 议题跟踪：本地 Markdown
 
-本仓库不是 GitHub 远程仓库。议题与规格写在 `.scratch/` 下的 Markdown 文件里。
+代码托管在 GitHub。议题与规格仍写在仓库内 `.scratch/` 下的 Markdown 文件里，不使用 GitHub Issues。
 
 ## 约定
 
