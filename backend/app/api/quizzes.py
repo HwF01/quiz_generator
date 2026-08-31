@@ -190,6 +190,18 @@ async def generate(
     return ok({"job_id": job_id, "quiz_id": quiz_id})
 
 
+async def _favorited_quiz_ids(db: AsyncSession, user_id: str, quiz_ids: list[str]) -> set[str]:
+    if not quiz_ids:
+        return set()
+    rows = await db.execute(
+        select(Favorite.quiz_set_id).where(
+            Favorite.user_id == user_id,
+            Favorite.quiz_set_id.in_(quiz_ids),
+        )
+    )
+    return set(rows.scalars().all())
+
+
 @router.get("/favorites")
 async def my_favorites(
     user: User = Depends(get_current_user),
@@ -200,7 +212,7 @@ async def my_favorites(
         .join(Favorite, Favorite.quiz_set_id == QuizSet.id)
         .where(Favorite.user_id == user.id, QuizSet.status != "failed")
     )
-    return ok([_quiz_out(quiz) for quiz in rows.scalars().all()])
+    return ok([_quiz_out(quiz, {"favorited": True}) for quiz in rows.scalars().all()])
 
 
 @router.get("")
@@ -215,7 +227,8 @@ async def my_quizzes(
     )
     quizzes = list(rows.scalars().all())
     visible = [q for q in quizzes if q.status != "failed"]
-    return ok([_quiz_out(q) for q in visible])
+    fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
+    return ok([_quiz_out(q, {"favorited": q.id in fav_ids}) for q in visible])
 
 
 @router.get("/{quiz_id}")

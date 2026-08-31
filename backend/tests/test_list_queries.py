@@ -132,6 +132,7 @@ async def test_favorites_plays_wrong_and_starred_are_batched(
     assert favs.status_code == 200
     fav_data = favs.json()["data"]
     assert {row["title"] for row in fav_data} == {quiz.title for quiz in quizzes}
+    assert all(row["favorited"] is True for row in fav_data)
     assert len([s for s in fav_sql if "quiz_sets" in s.lower()]) == 1
 
     statements.clear()
@@ -162,3 +163,23 @@ async def test_favorites_plays_wrong_and_starred_are_batched(
     assert {row["quiz"]["title"] for row in star_data} == {quiz.title for quiz in quizzes}
     assert all(row["favorited"] is True for row in star_data)
     assert len([s for s in star_sql if "question_favorites" in s.lower()]) == 1
+
+
+async def test_my_quizzes_include_favorited(client: AsyncClient, session_factory):
+    data = await register(client, "myfav@example.com")
+    token = data["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = await _user_id(client, token)
+    quizzes = await _seed_public_quizzes(session_factory, user_id, 2)
+    async with session_factory() as db:
+        db.add(Favorite(user_id=user_id, quiz_set_id=quizzes[0].id))
+        await db.commit()
+        statements = _listen_sql(db.get_bind())
+
+    statements.clear()
+    res = await client.get("/api/quizzes", headers=headers)
+    assert res.status_code == 200
+    body = {row["id"]: row for row in res.json()["data"]}
+    assert body[quizzes[0].id]["favorited"] is True
+    assert body[quizzes[1].id]["favorited"] is False
+    assert len([s for s in statements if "favorites" in s.lower()]) == 1

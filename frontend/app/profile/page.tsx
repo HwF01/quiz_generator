@@ -6,6 +6,7 @@ import { api, getToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { PlayDetailDialog, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FavoriteButton } from "@/components/FavoriteButton";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { quizStatusLabel } from "@/lib/labels";
 
@@ -16,6 +17,8 @@ type Quiz = {
   question_count: number;
   visibility: string;
   category: string;
+  favorited: boolean;
+  is_builtin: boolean;
 };
 
 type Play = {
@@ -63,13 +66,14 @@ function modeLabel(mode?: string): string {
 export default function ProfilePage() {
   const router = useRouter();
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [favs, setFavs] = useState<Quiz[]>([]);
   const [plays, setPlays] = useState<Play[]>([]);
   const [me, setMe] = useState<{ nickname: string; email: string; quota?: { remaining: number; limit: number } } | null>(null);
   const [detail, setDetail] = useState<PlayDetail | null>(null);
   const [detailError, setDetailError] = useState("");
+  const [quizError, setQuizError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
+  const [pendingQuizId, setPendingQuizId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -80,7 +84,6 @@ export default function ProfilePage() {
     Promise.all([
       api<typeof me>("/auth/me").then(setMe),
       api<Quiz[]>("/quizzes").then(setQuizzes),
-      api<Quiz[]>("/quizzes/favorites").then(setFavs).catch(() => setFavs([])),
       api<Play[]>("/plays").then(setPlays).catch(() => setPlays([])),
     ]).finally(() => setLoading(false));
   }, [router]);
@@ -93,6 +96,35 @@ export default function ProfilePage() {
       setDetail(data);
     } catch (e) {
       setDetailError(e instanceof Error ? e.message : "加载详情失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleQuizFav(quizId: string) {
+    setQuizError("");
+    try {
+      const data = await api<{ favorited: boolean }>(`/quizzes/${quizId}/favorite`, { method: "POST" });
+      setQuizzes((prev) => prev.map((q) => (q.id === quizId ? { ...q, favorited: data.favorited } : q)));
+    } catch (e) {
+      setQuizError(e instanceof Error ? e.message : "收藏失败");
+    }
+  }
+
+  function requestRemoveQuiz(quizId: string) {
+    setPendingQuizId(quizId);
+  }
+
+  async function confirmRemoveQuiz() {
+    if (!pendingQuizId) return;
+    setQuizError("");
+    setBusyId(pendingQuizId);
+    try {
+      await api(`/quizzes/${pendingQuizId}`, { method: "DELETE" });
+      setQuizzes((prev) => prev.filter((q) => q.id !== pendingQuizId));
+      setPendingQuizId(null);
+    } catch (e) {
+      setQuizError(e instanceof Error ? e.message : "删除失败");
     } finally {
       setBusyId(null);
     }
@@ -140,34 +172,40 @@ export default function ProfilePage() {
       </div>
       <section>
         <h2 className="mb-3 font-medium">我创建的</h2>
+        {quizError ? <p className="mb-3 text-sm text-red-600">{quizError}</p> : null}
         <div className="grid gap-3 md:grid-cols-2">
           {quizzes.map((q) => (
-            <Link key={q.id} href={`/quizzes/${q.id}`} className="card p-4 hover:border-brand-500 active:border-brand-500">
+            <article key={q.id} className="card p-4">
               <div className="flex items-start justify-between gap-2">
-                <strong className="min-w-0 break-words">{q.title}</strong>
-                <span className="badge shrink-0">{quizStatusLabel(q.status)}</span>
+                <Link href={`/quizzes/${q.id}`} className="min-w-0 break-words font-medium hover:text-brand-700">
+                  {q.title}
+                </Link>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="badge">{quizStatusLabel(q.status)}</span>
+                  <FavoriteButton favorited={q.favorited} onToggle={() => void toggleQuizFav(q.id)} />
+                </div>
               </div>
               <p className="mt-2 text-sm text-slate-500">
                 {q.category} · {q.question_count} 题 · {q.visibility === "public" ? "公开" : "私密"}
               </p>
-            </Link>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link className="btn-ghost" href={`/quizzes/${q.id}`}>
+                  查看
+                </Link>
+                {q.is_builtin ? null : (
+                  <button
+                    type="button"
+                    className="btn-danger"
+                    disabled={busyId === q.id}
+                    onClick={() => requestRemoveQuiz(q.id)}
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
+            </article>
           ))}
           {quizzes.length === 0 && <p className="text-sm text-slate-500">还没有题库，去上传一份文档吧。</p>}
-        </div>
-      </section>
-      <section>
-        <h2 className="mb-3 font-medium">收藏的题库</h2>
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-          {favs.map((q) => (
-            <Link
-              key={q.id}
-              href={`/quizzes/${q.id}`}
-              className="border-b-2 border-transparent pb-1 text-sm text-slate-600 transition hover:border-brand-600 hover:text-brand-700"
-            >
-              {q.title}
-            </Link>
-          ))}
-          {favs.length === 0 && <p className="text-sm text-slate-500">暂无收藏</p>}
         </div>
       </section>
       <section>
@@ -228,6 +266,15 @@ export default function ProfilePage() {
         busy={busyId === pendingPlayId}
         onCancel={() => !busyId && setPendingPlayId(null)}
         onConfirm={() => void confirmRemovePlay()}
+      />
+      <ConfirmDialog
+        open={pendingQuizId !== null}
+        title="删除题库"
+        description="确定删除这个题库？题目也会一并删除。此操作不可撤销。"
+        confirmLabel="删除"
+        busy={busyId === pendingQuizId}
+        onCancel={() => !busyId && setPendingQuizId(null)}
+        onConfirm={() => void confirmRemoveQuiz()}
       />
     </div>
   );

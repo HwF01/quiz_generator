@@ -60,6 +60,32 @@ function isConstructedQuestion(question: Question): boolean {
     && Boolean(question.subparts?.length);
 }
 
+function isQuestionAnswered(question: Question, value: AnswerValue | undefined): boolean {
+  if (value === undefined) return false;
+  if (isConstructedQuestion(question)) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    return (question.subparts ?? []).every((part) => Boolean(value[part.id]?.trim()));
+  }
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return false;
+}
+
+function unansweredIndexes(questions: Question[], answers: Record<string, AnswerValue>): number[] {
+  return questions.flatMap((question, index) =>
+    isQuestionAnswered(question, answers[question.id]) ? [] : [index],
+  );
+}
+
+function unansweredSubmitDescription(indexes: number[]): string {
+  const labels = indexes.map((index) => String(index + 1)).join("、");
+  const head =
+    indexes.length === 1
+      ? `第 ${labels} 题尚未作答。`
+      : `还有 ${indexes.length} 道题未作答：第 ${labels} 题。`;
+  return `${head}未作答将按错计。确定交卷吗？`;
+}
+
 export default function PracticePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -79,6 +105,8 @@ export default function PracticePage() {
   const [msg, setMsg] = useState("");
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [pendingUnanswered, setPendingUnanswered] = useState<number[] | null>(null);
+  const [submitBusy, setSubmitBusy] = useState(false);
   const [gradingQuestionId, setGradingQuestionId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
 
@@ -191,26 +219,53 @@ export default function PracticePage() {
     }
   }
 
+  function requestSubmit() {
+    if (!quiz || submitBusy) return;
+    const missing = unansweredIndexes(quiz.questions, answers);
+    if (missing.length === 0) {
+      void submit();
+      return;
+    }
+    setPendingUnanswered(missing);
+  }
+
+  function cancelPendingSubmit() {
+    if (submitBusy) return;
+    const first = pendingUnanswered?.[0];
+    setPendingUnanswered(null);
+    if (first !== undefined) setIdx(first);
+  }
+
   async function submit() {
-    if (!quiz) return;
+    if (!quiz || submitBusy) return;
     const question_ids = qFilter ? quiz.questions.map((x) => x.id) : undefined;
-    const data = await api<Result>(`/plays/${quiz.id}`, {
-      method: "POST",
-      body: JSON.stringify({
-        answers,
-        time_spent: seconds,
-        mode: qFilter ? "wrong_retry" : mode,
-        ...(question_ids ? { question_ids } : {}),
-      }),
-    });
-    setResult(data);
-    if (data.record_id) {
-      try {
-        const detail = await api<PlayDetail>(`/plays/${data.record_id}`);
-        setPlayDetail(detail);
-      } catch (e) {
-        setMsg(e instanceof Error ? e.message : "加载作答详情失败");
+    setSubmitBusy(true);
+    setMsg("");
+    try {
+      const data = await api<Result>(`/plays/${quiz.id}`, {
+        method: "POST",
+        body: JSON.stringify({
+          answers,
+          time_spent: seconds,
+          mode: qFilter ? "wrong_retry" : mode,
+          ...(question_ids ? { question_ids } : {}),
+        }),
+      });
+      setResult(data);
+      setPendingUnanswered(null);
+      if (data.record_id) {
+        try {
+          const detail = await api<PlayDetail>(`/plays/${data.record_id}`);
+          setPlayDetail(detail);
+        } catch (e) {
+          setMsg(e instanceof Error ? e.message : "加载作答详情失败");
+        }
       }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "交卷失败");
+      setPendingUnanswered(null);
+    } finally {
+      setSubmitBusy(false);
     }
   }
 
@@ -463,7 +518,7 @@ export default function PracticePage() {
             下一题
           </button>
         ) : (
-          <button className="btn-primary" onClick={submit}>
+          <button className="btn-primary" disabled={submitBusy} onClick={requestSubmit}>
             交卷
           </button>
         )}
@@ -477,6 +532,16 @@ export default function PracticePage() {
       busy={deleteBusy}
       onCancel={() => !deleteBusy && setPendingDelete(false)}
       onConfirm={() => void confirmRemoveCurrent()}
+    />
+    <ConfirmDialog
+      open={pendingUnanswered !== null}
+      title="还有题目未作答"
+      description={pendingUnanswered ? unansweredSubmitDescription(pendingUnanswered) : ""}
+      confirmLabel="仍要交卷"
+      cancelLabel="返回作答"
+      busy={submitBusy}
+      onCancel={cancelPendingSubmit}
+      onConfirm={() => void submit()}
     />
     </>
   );
