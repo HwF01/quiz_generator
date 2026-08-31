@@ -43,10 +43,12 @@ def rubric_valid(subparts: object) -> bool:
     return True
 
 
-async def build_grading_rubric(question: dict, passage: str) -> dict:
+async def build_grading_rubric(
+    question: dict, passage: str, *, subject: str = "general"
+) -> dict:
     if not is_constructed(question):
         return question
-    provider = critic_provider()
+    provider = critic_provider(subject)
     prompt = load_prompt("build_grading_rubric")
     user = (
         f"题型：{question.get('type')}\n题干：{question.get('content')}\n"
@@ -78,10 +80,12 @@ async def build_grading_rubric(question: dict, passage: str) -> dict:
     return question
 
 
-async def grade_constructed_response(question: dict, user_answer: dict[str, str]) -> dict:
+async def grade_constructed_response(
+    question: dict, user_answer: dict[str, str], *, subject: str = "general"
+) -> dict:
     if not is_constructed(question) or not rubric_valid(question.get("subparts")):
         raise AppError("该题尚未具备可用评分量规，请先审校题目", code=400)
-    provider = critic_provider()
+    provider = critic_provider(subject)
     prompt = load_prompt("grade_constructed_response")
     user = (
         f"题型：{question.get('type')}\n题干：{question.get('content')}\n"

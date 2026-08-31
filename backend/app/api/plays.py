@@ -369,7 +369,12 @@ async def grade_play_question(
     if previous.get("status") == "graded" and previous.get("answer_hash") == answer_hash:
         return ok({"grade": previous, "score": rec.score, "cached": True})
 
-    grade = await grade_constructed_response(_question_payload(question), normalized)
+    quiz = await db.get(QuizSet, rec.quiz_set_id)
+    grade = await grade_constructed_response(
+        _question_payload(question),
+        normalized,
+        subject=quiz.subject if quiz else "general",
+    )
     grade["answer_hash"] = answer_hash
     grade["prompt_version"] = "grade_constructed_response:v1"
     grade["graded_at"] = datetime.now(timezone.utc).isoformat()

@@ -14,6 +14,8 @@ def restore_settings():
         "app_env": settings.app_env,
         "qwen_api_key": settings.qwen_api_key,
         "deepseek_api_key": settings.deepseek_api_key,
+        "openai_api_key": settings.openai_api_key,
+        "anthropic_api_key": settings.anthropic_api_key,
         "tavily_api_key": settings.tavily_api_key,
         "mock_llm": settings.mock_llm,
     }
@@ -34,6 +36,19 @@ def test_setup_status_never_includes_secrets(restore_settings):
     assert data["deepseek_configured"] is True
     assert data["tavily_configured"] is True
     assert "qwen_api_key" not in data
+
+
+def test_setup_status_self_review_when_single_live_key(restore_settings):
+    object.__setattr__(settings, "mock_llm", False)
+    object.__setattr__(settings, "qwen_api_key", "sk-qwen")
+    object.__setattr__(settings, "deepseek_api_key", "")
+    object.__setattr__(settings, "openai_api_key", "")
+    object.__setattr__(settings, "anthropic_api_key", "")
+    data = setup_status()
+    assert data["llm_mode"] == "live"
+    assert data["self_review"] is True
+    object.__setattr__(settings, "deepseek_api_key", "sk-ds")
+    assert setup_status()["self_review"] is False
 
 
 def test_upsert_env_values_preserves_other_keys(tmp_path):
@@ -58,6 +73,7 @@ async def test_get_setup_is_public(client: AsyncClient):
         "deepseek_configured",
         "tavily_configured",
         "editable",
+        "self_review",
     }
     assert "api_key" not in str(data).lower()
 
@@ -104,6 +120,7 @@ async def test_put_setup_writes_keys_and_hot_reloads(
     assert body["qwen_configured"] is True
     assert body["deepseek_configured"] is True
     assert body["tavily_configured"] is True
+    assert body["self_review"] is False
     assert body["editable"] is True
     assert "sk-qwen" not in res.text
     assert settings.web_search_available is True
@@ -120,6 +137,7 @@ async def test_put_setup_writes_keys_and_hot_reloads(
 
     demo = await client.put("/api/setup", json={"use_demo": True}, headers=headers)
     assert demo.json()["data"]["llm_mode"] == "mock"
+    assert demo.json()["data"]["self_review"] is False
     assert settings.qwen_api_key == "sk-qwen"
 
     live = await client.put("/api/setup", json={"use_demo": False}, headers=headers)
@@ -136,9 +154,12 @@ def test_apply_setup_update_empty_keeps_existing(tmp_path, monkeypatch, restore_
     object.__setattr__(settings, "app_env", "desktop")
     object.__setattr__(settings, "qwen_api_key", "keep-qwen")
     object.__setattr__(settings, "deepseek_api_key", "")
+    object.__setattr__(settings, "openai_api_key", "")
+    object.__setattr__(settings, "anthropic_api_key", "")
     object.__setattr__(settings, "tavily_api_key", "")
     object.__setattr__(settings, "mock_llm", False)
     status = apply_setup_update(qwen_api_key="  ", deepseek_api_key="new-ds")
     assert settings.qwen_api_key == "keep-qwen"
     assert settings.deepseek_api_key == "new-ds"
     assert status["llm_mode"] == "live"
+    assert status["self_review"] is False

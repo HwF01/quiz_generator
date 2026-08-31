@@ -73,8 +73,10 @@ def filter_candidates(
     return kept
 
 
-async def overgenerate(stem: str, answer: str, passage: str) -> list[dict]:
-    provider = critic_provider()
+async def overgenerate(
+    stem: str, answer: str, passage: str, *, subject: str = "general"
+) -> list[dict]:
+    provider = critic_provider(subject)
     prompt = load_prompt("overgenerate_distractors")
     user = (
         f"题干：{stem}\n正确答案：{answer}\n"
@@ -97,11 +99,12 @@ async def validate_candidates(
     stem: str,
     answer: str,
     passage: str,
+    subject: str = "general",
 ) -> tuple[list[dict], bool]:
     if not candidates:
         return [], False
     numbered = [{**cand, "id": str(i)} for i, cand in enumerate(candidates)]
-    provider = critic_provider()
+    provider = critic_provider(subject)
     prompt = load_prompt("validate_distractors")
     user = (
         f"题干：{stem}\n正确答案：{answer}\n候选：{json.dumps(numbered, ensure_ascii=False)}\n"
@@ -139,10 +142,10 @@ async def validate_candidates(
     return accepted, False
 
 
-async def adversarial_fix(question: dict, passage: str) -> dict:
+async def adversarial_fix(question: dict, passage: str, *, subject: str = "general") -> dict:
     if not question.get("options"):
         return question
-    provider = critic_provider()
+    provider = critic_provider(subject)
     prompt = load_prompt("adversarial_review")
     user = (
         f"题目：{question.get('content')}\n选项：{question.get('options')}\n"
@@ -189,7 +192,9 @@ async def adversarial_fix(question: dict, passage: str) -> dict:
     return question
 
 
-async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str) -> dict:
+async def build_choice_question(
+    stem_payload: dict, passage: str, chunk_id: str, *, subject: str = "general"
+) -> dict:
     stem = stem_payload.get("stem") or ""
     answer = stem_payload.get("correct_text") or ""
     qtype = stem_payload.get("type") or "single_choice"
@@ -217,15 +222,15 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
             ] or [answer]
         return _pack(stem_payload, None, structured_answer, None, chunk_id)
 
-    cands = await overgenerate(stem, answer, passage)
+    cands = await overgenerate(stem, answer, passage, subject=subject)
     filtered = await asyncio.to_thread(
         filter_candidates, cands, answer=answer, stem=stem, passage=passage
     )
     validated, critic_error = await validate_candidates(
-        filtered, stem=stem, answer=answer, passage=passage
+        filtered, stem=stem, answer=answer, passage=passage, subject=subject
     )
     if len(validated) < 3 and not critic_error:
-        extra = await overgenerate(stem, answer, passage)
+        extra = await overgenerate(stem, answer, passage, subject=subject)
         filtered = await asyncio.to_thread(
             filter_candidates,
             filtered + extra,
@@ -234,7 +239,7 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
             passage=passage,
         )
         validated, retry_critic_error = await validate_candidates(
-            filtered, stem=stem, answer=answer, passage=passage
+            filtered, stem=stem, answer=answer, passage=passage, subject=subject
         )
         critic_error = retry_critic_error
     ranked = (
@@ -282,7 +287,7 @@ async def build_choice_question(stem_payload: dict, passage: str, chunk_id: str)
         remapped,
         chunk_id,
     )
-    packed = await adversarial_fix(packed, passage)
+    packed = await adversarial_fix(packed, passage, subject=subject)
     return packed
 
 

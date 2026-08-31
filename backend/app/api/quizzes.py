@@ -488,8 +488,10 @@ async def harden_question(
             if opt.get("key") in correct_keys:
                 stem["correct_text"] = opt.get("text")
     try:
-        rebuilt = await build_choice_question(stem, passage, q.source_chunk_id or "")
-        rebuilt = await apply_gates(rebuilt, passage)
+        rebuilt = await build_choice_question(
+            stem, passage, q.source_chunk_id or "", subject=quiz.subject
+        )
+        rebuilt = await apply_gates(rebuilt, passage, subject=quiz.subject)
     except AppError:
         raise
     except Exception as exc:

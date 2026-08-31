@@ -111,8 +111,8 @@ def stem_leaks_answer(question: dict) -> bool:
     return False
 
 
-async def judge_with_critic(question: dict, passage: str) -> dict:
-    provider = critic_provider()
+async def judge_with_critic(question: dict, passage: str, *, subject: str = "general") -> dict:
+    provider = critic_provider(subject)
     prompt = load_prompt("quality_judge")
     user = (
         f"题型：{question.get('type')}\n目标难度：{question.get('target_difficulty')}\n"
@@ -140,7 +140,11 @@ async def judge_with_critic(question: dict, passage: str) -> dict:
 
 
 async def apply_gates(
-    question: dict, passage: str, *, subject_tags: list[str] | None = None
+    question: dict,
+    passage: str,
+    *,
+    subject_tags: list[str] | None = None,
+    subject: str = "general",
 ) -> dict:
     existing_scores = question.get("quality_scores") or {}
     existing_reasons = list(existing_scores.get("review_reasons") or [])
@@ -150,7 +154,7 @@ async def apply_gates(
     leak = stem_leaks_answer(question)
     rubric_ok = not is_constructed(question) or rubric_valid(question.get("subparts"))
     subject_ok = not subject_tags or question.get("type") in allowed_question_types(subject_tags)
-    scores = await judge_with_critic(question, passage)
+    scores = await judge_with_critic(question, passage, subject=subject)
     critic_error = bool(scores.get("critic_error")) or "critic_error" in existing_reasons
     usability = int((scores.get("usability") or 0) if critic_error else (scores.get("usability") or 3))
     if scores.get("answer_exists") is False:

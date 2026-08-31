@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.services.llm.router import is_self_review_config
 
 _EDITABLE_ENVS = frozenset({"desktop", "local"})
 
@@ -28,6 +29,7 @@ def setup_status() -> dict:
         "deepseek_configured": bool(settings.deepseek_api_key),
         "tavily_configured": bool(settings.tavily_api_key),
         "editable": is_setup_editable(),
+        "self_review": is_self_review_config(),
     }
 
 
