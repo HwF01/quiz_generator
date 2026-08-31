@@ -29,7 +29,7 @@ return ok({"token": token, "user": ...})
 
 ## 队列与缓存
 
-- 出题任务走 ARQ：`app.core.arq.redis_settings` + `app.worker.generate_quiz_job`。
+- 出题任务：Docker/生产走 ARQ（`app.core.arq.redis_settings` + `app.worker.generate_quiz_job`）。`APP_ENV=local` / `desktop` 或 SQLite 本机栈用 FastAPI `BackgroundTasks` 调 `_run_generation_job`，不依赖 worker。不要把本机路径改成「必须有 ARQ」。
 - Redis 客户端：`app.core.redis.get_redis()`（`redis.asyncio` 或 local `MemoryRedis`）。不要另开一套连接工厂。
 - 改 Redis 键或连接时同时看官方 `redis-core` / `redis-connections`。
 

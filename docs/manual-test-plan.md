@@ -37,14 +37,14 @@ LLM 建议分两轮：
 
 | # | 步骤 | 期望 | 通过 |
 |---|------|------|:----:|
-| S1 | 打开首页 `/` | 可进广场/上传/点击刷题入口；导航含「点击刷题」「题库管理/审校」 | ☐ |
+| S1 | 打开首页 `/` | 可进广场/上传/点击刷题入口；导航含「点击刷题」「题库管理/审校」「收藏」；登录后另有「设置」 | ☐ |
 | S2 | 注册新用户 → 自动登录 | 有 token；跳转上传或个人页 | ☐ |
 | S3 | 上传一份短 TXT/MD，题量 4–8，私密 | Job 进度推进；成功后进 `/quizzes/{id}` | ☐ |
 | S4 | 审校页能看到题干/选项/答案；练习页看不到答案 | 审校有答案；练习无答案泄漏 | ☐ |
 | S5 | 完成一次练习并提交 | 出分；错题进错题本 | ☐ |
 | S6 | 广场能看到内置题库并可练习 | 常识/考公/考研/IT/历史等 pack 可用 | ☐ |
 | S7 | 导出 JSON + XLSX | 可下载且内容完整 | ☐ |
-| S8 | 登出后再访问 `/upload` `/practice` `/profile` `/wrong` | 被拦到登录 | ☐ |
+| S8 | 登出后再访问 `/upload` `/practice` `/profile` `/wrong` `/favorites` `/settings` | 被拦到登录 | ☐ |
 
 ---
 
@@ -60,7 +60,7 @@ LLM 建议分两轮：
 | A4 | 正常登录 | 正确账号密码 | 跳转个人中心；写 `quiz_auth` cookie | ☐ |
 | A5 | 错误密码 | 随意密码 | 401，不落 cookie | ☐ |
 | A6 | 系统号登录 | `system@example.com`（seed） | **明确拒绝登录** | ☐ |
-| A7 | 未登录访问 | 直接开 `/upload` `/practice` `/practice/*` `/profile` `/wrong` | middleware 重定向登录 | ☐ |
+| A7 | 未登录访问 | 直接开 `/upload` `/practice` `/practice/*` `/profile` `/wrong` `/favorites` `/settings` | middleware 重定向登录 | ☐ |
 | A8 | Cookie 与 JWT 不一致 | 清 localStorage 但留 cookie，或反之 | 页面可能进得去但 API 401；确认不会半登录脏状态 | ☐ |
 | A9 | 登出 | 点登出 | token/cookie 清掉；再调需登录接口失败 | ☐ |
 
@@ -68,10 +68,12 @@ LLM 建议分两轮：
 
 | # | 用例 | 期望 | 通过 |
 |---|------|------|:----:|
-| A10 | `/profile` 展示题库管理/审校、练习历史、剩余配额 | 与 `/auth/me`、`/stats/quota` 一致；导航名不再是「我的题库」 | ☐ |
+| A10 | `/profile` 展示题库管理/审校、练习历史、剩余配额 | 与 `/auth/me`、`/stats/quota` 一致 | ☐ |
 | A11 | 连续生成直到触顶 | 第 21 次（默认）返回 **429**，文案含「今日生成次数已用完」 | ☐ |
 | A12 | 生成失败后配额 | Job `failed` 后配额应 **退回**（`decr_quota`）；可再生成 | ☐ |
 | A13 | memory Redis 重启 | 本机重启后当日已用次数归零（记录为已知行为） | ☐ |
+| A14 | `/settings` | 登录可见；可改通义/DeepSeek/Tavily 与演示模式；未登录重定向 | ☐ |
+| A15 | 无 Tavily 勾选联网 | 上传页「联网补充知识」不可用；强行 generate 返回 **503**，普通出题不受影响 | ☐ |
 
 ---
 
@@ -100,12 +102,13 @@ LLM 建议分两轮：
 
 | # | 用例 | 观察点 | 通过 |
 |---|------|--------|:----:|
-| G1 | 默认配置出题 | 进度条与 stage：解析 → 篇章映射 → 出题 → 干扰项 → 质量门控；最终 `succeeded` | ☐ |
+| G1 | 默认配置出题 | 进度条与 stage：解析 → 科目识别与篇章映射 → 抽关键句 → 出题 → 质量门控；勾选联网时含「检索补充知识」；最终 `succeeded` | ☐ |
 | G2 | 科目 `auto` vs 手动 | IT/数理/逻辑倾向 DeepSeek；其它偏 Qwen（有 Key 时看 `models_used`） | ☐ |
 | G3 | 题量滑条 4 / 12 / 20 | 成题数接近设定（受材料长度限制时可更少，但不应静默挂死） | ☐ |
 | G4 | 私密 / 公开 | `visibility=public` 后广场可见；private 仅自己可见 | ☐ |
 | G5 | Job 轮询 | 每 ~1.5s 刷新；成功自动跳转审校页 | ☐ |
 | G6 | 失败展示 | 人为制造解析失败：右侧展示 `failed` + error，不白屏 | ☐ |
+| G9 | 联网补充 | 已配 Tavily，勾选「联网补充知识」 | 进度含检索；审校页题目带可核验外部参考来源；未授权时不发原文 | ☐ |
 
 ### 4.2 相似文档复用
 
@@ -121,7 +124,7 @@ LLM 建议分两轮：
 | # | 检查项 | 期望 | 通过 |
 |---|--------|------|:----:|
 | Q1 | 单选题 | 1 正解 + 3 个具体干扰项；干扰项材料相关、确定错误、互不雷同，且不是正解同义改写 | ☐ |
-| Q2 | 判断 / 填空 | 判断有 T/F；填空无强行凑干扰项 | ☐ |
+| Q2 | 判断 / 主观题 | 判断有对/错、无干扰项流水线；填空/应用/证明/简答有小问与评分量规，不凑四选项 | ☐ |
 | Q3 | `needs_review` | 干扰项不足时不显示占位选项；答案无依据、选项雷同、题干泄答案、语义等价或 critic 失败等应标黄待审并说明原因 | ☐ |
 | Q4 | 质量分 | `quality_scores` 含 answer_exists / unique_correct / leak / usability / review_reasons 等，0 分也应显示 | ☐ |
 | Q5 | 细节题比例 | `max_detail_ratio=0.3`，细节题不应占绝大多数 | ☐ |
@@ -168,6 +171,7 @@ LLM 建议分两轮：
 | P7 | 练习不泄答案 | Network 看 GET quiz `purpose=practice` | 无 answer / 无正解标记 | ☐ |
 | P8 | 空题库 | 异常数据 | 有错误提示，不崩溃 | ☐ |
 | P9 | 评分 1–5 | 练完后评分 | 写入成功；可再看 | ☐ |
+| P10 | 主观题辅助批改 | 作答填空/简答等后触发 AI 批改 | 展示分项分数、依据与建议；文案是辅助批改不是最终成绩；可复核 | ☐ |
 
 ---
 
@@ -178,7 +182,7 @@ LLM 建议分两轮：
 | Z1 | 未登录浏览 | 可见公开/内置；收藏需登录 | ☐ |
 | Z2 | 分类筛选 | 常识/考公/考研/IT/历史等 | ☐ |
 | Z3 | 搜索 | 关键词命中标题/内容；排序 hot/new | ☐ |
-| Z4 | 收藏 | 登录后收藏/取消；个人中心可见 | ☐ |
+| Z4 | 收藏 | 登录后收藏/取消；`/favorites` 与个人中心可见 | ☐ |
 | Z5 | 他人私密库 | 猜 UUID 访问 | **404「题库不存在」**（不是 403） | ☐ |
 | Z6 | 公开库练习 | B 可练习 A 的 public 库 | 可玩不可改 | ☐ |
 
@@ -311,16 +315,19 @@ LLM 建议分两轮：
 | `/practice/[id]` | 作答（需登录） |
 | `/plaza` | 广场（公开浏览） |
 | `/profile` | 题库管理/审校（需登录） |
+| `/favorites` | 收藏（需登录） |
 | `/wrong` | 错题本（需登录） |
+| `/settings` | 设置：模型 Key / 演示模式 / Tavily（需登录） |
 
 | API 域 | 关键端点 |
 |--------|----------|
 | Auth | `POST /api/auth/register` `POST /api/auth/login` `GET /api/auth/me` |
-| Documents | `POST /api/documents/upload` |
+| Documents | `POST /api/documents/upload` `POST /api/documents/{id}/generation-preview` |
 | Jobs | `GET /api/jobs/{id}` |
 | Quizzes | `POST /api/quizzes/generate`、列表/详情/PATCH/DELETE、harden、favorite、rate |
-| Practice | `POST /api/plays/{quiz_id}` `GET /api/plays` `GET /api/wrong-questions` |
+| Practice | `POST /api/plays/{quiz_id}` `GET /api/plays` `POST /api/plays/{id}/questions/{qid}/ai-grade` `GET /api/wrong-questions` |
 | Plaza | `GET /api/plaza` `GET /api/plaza/categories` |
 | Export | `GET /api/export/{id}.json` `GET /api/export/{id}.xlsx` |
 | Stats | `GET /api/stats/quota` |
+| Setup | `GET /api/setup` `PUT /api/setup` |
 | Health | `GET /health` `GET /api/health` |
