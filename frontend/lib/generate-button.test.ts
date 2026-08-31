@@ -19,4 +19,10 @@ describe("generate button lock", () => {
     assert.equal(isGenerateSubmitLocked(true, null), true);
     assert.equal(generateSubmitLabel({ busy: true, jobStatus: null, hasPreview: true }), "提交中…");
   });
+
+  it("unlocks back to 解析并配置 after the in-flight job is cleared", () => {
+    assert.equal(isGenerateSubmitLocked(false, "running"), true);
+    assert.equal(isGenerateSubmitLocked(false, null), false);
+    assert.equal(generateSubmitLabel({ busy: false, jobStatus: null, hasPreview: false }), "解析并配置");
+  });
 });

@@ -89,6 +89,7 @@ export default function UploadPage() {
   const titleTouchedRef = useRef(false);
   const titlesCacheRef = useRef<string[] | null>(null);
   const submitLockRef = useRef(false);
+  const selectionRef = useRef(0);
   const showDifficulty = subjectTags.some((tag) => ["it", "math", "logic"].includes(tag));
   const manualCountTotal = useMemo(() => countTotal(typeCounts), [typeCounts]);
   const jobInFlight = isJobInFlight(job?.status);
@@ -114,9 +115,11 @@ export default function UploadPage() {
 
   useEffect(() => {
     if (!job || job.status === "succeeded" || job.status === "failed") return;
+    let cancelled = false;
     const t = setInterval(async () => {
       try {
         const next = await api<Job>(`/jobs/${job.id}`);
+        if (cancelled) return;
         setJob(next);
         if (next.status === "succeeded" && next.quiz_set_id) {
           router.push(`/quizzes/${next.quiz_set_id}`);
@@ -125,7 +128,10 @@ export default function UploadPage() {
         /* keep polling through transient proxy/500s */
       }
     }, 1500);
-    return () => clearInterval(t);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, [job, router]);
 
   function blueprint(mode: AllocationMode = allocationMode) {
@@ -175,6 +181,7 @@ export default function UploadPage() {
       setErr("各题型数量之和必须等于总题量");
       return;
     }
+    const selection = selectionRef.current;
     const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
       method: "POST",
       body: JSON.stringify({
@@ -187,6 +194,7 @@ export default function UploadPage() {
         force,
       }),
     });
+    if (selection !== selectionRef.current) return;
     setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
   }
 
@@ -278,12 +286,15 @@ export default function UploadPage() {
             accept=".pdf,.docx,.pptx,.txt,.md"
             className="file-input"
             onChange={(e) => {
+              selectionRef.current += 1;
               setFile(e.target.files?.[0] || null);
               setDocumentId(null);
               setPreview(null);
               setSubjectTags([]);
               setTypeCounts({});
               setNotice("");
+              setErr("");
+              setJob(null);
             }}
           />
         </label>
