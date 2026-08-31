@@ -260,6 +260,7 @@ export default function PracticePage() {
         } catch (e) {
           setMsg(e instanceof Error ? e.message : "加载作答详情失败");
         }
+
       }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "交卷失败");

@@ -78,6 +78,10 @@ def choice_structure_valid(question: dict) -> bool:
     )
 
 
+def is_practice_eligible(question: dict) -> bool:
+    return (not question.get("needs_review")) and choice_structure_valid(question)
+
+
 def unique_correct(question: dict) -> bool:
     options = question.get("options") or []
     answer = question.get("answer") or {}

@@ -23,7 +23,7 @@ from app.models.user import User
 from app.schemas.quiz import GenerateQuizIn, QuestionUpdateIn, QuizUpdateIn, RatingIn
 from app.services.blueprint import subject_tags_for, validate_type_counts
 from app.services.distractor_engine import build_choice_question
-from app.services.quality_gates import apply_gates, choice_structure_valid
+from app.services.quality_gates import apply_gates, choice_structure_valid, is_practice_eligible
 from app.services.quota import assert_quota, incr_quota
 from app.services.quiz_title import uniquify_title
 from app.services.subjective_grading import is_constructed, rubric_valid
@@ -246,11 +246,7 @@ async def get_quiz(
     )
     questions = [_q_out(q) for q in qrows.scalars().all()]
     if purpose == "practice":
-        questions = [
-            q
-            for q in questions
-            if not q["needs_review"] and choice_structure_valid(q)
-        ]
+        questions = [q for q in questions if is_practice_eligible(q)]
     fav_ids: set[str] = set()
     if user and questions:
         fav_rows = await db.execute(
