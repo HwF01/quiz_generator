@@ -1,8 +1,11 @@
 import pytest
 
+from sqlalchemy import select
+
 from app.models.document import Document
 from app.models.question import Question
 from app.models.quiz_set import QuizSet
+from app.models.wrong_question import WrongQuestion
 from tests.conftest import register
 
 
@@ -56,6 +59,50 @@ async def test_practice_hides_pending_questions(client, session_factory):
     assert practice.status_code == 200
     assert [question["content"] for question in practice.json()["data"]["questions"]] == ["光合作用发生在哪里？"]
     assert len(review.json()["data"]["questions"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_practice_submit_excludes_pending_questions(client, session_factory):
+    token, quiz_id, pending_id = await _quiz_with_questions(client, session_factory)
+    headers = {"Authorization": f"Bearer {token}"}
+    me = await client.get("/api/auth/me", headers=headers)
+    user_id = me.json()["data"]["id"]
+
+    practice = await client.get(f"/api/quizzes/{quiz_id}?purpose=practice", headers=headers)
+    ready_id = practice.json()["data"]["questions"][0]["id"]
+
+    submitted = await client.post(
+        f"/api/plays/{quiz_id}",
+        headers=headers,
+        json={"answers": {ready_id: "A"}, "time_spent": 5, "mode": "sequential"},
+    )
+    assert submitted.status_code == 200
+    payload = submitted.json()["data"]
+    detail_ids = [item["question_id"] for item in payload["details"]]
+    assert payload["total"] == 1
+    assert payload["correct"] == 1
+    assert payload["score"] == 100.0
+    assert detail_ids == [ready_id]
+    assert pending_id not in detail_ids
+
+    async with session_factory() as db:
+        wrong = await db.scalar(
+            select(WrongQuestion).where(
+                WrongQuestion.user_id == user_id,
+                WrongQuestion.question_id == pending_id,
+            )
+        )
+        assert wrong is None
+
+    detail = await client.get(f"/api/plays/{payload['record_id']}", headers=headers)
+    assert detail.status_code == 200
+    recorded = detail.json()["data"]
+    recorded_ids = [item["question_id"] for item in recorded["details"]]
+    assert recorded["total"] == 1
+    assert recorded["correct"] == 1
+    assert recorded_ids == [ready_id]
+    assert pending_id not in recorded_ids
+    assert all(item.get("user_answer") is not None for item in recorded["details"])
 
 
 @pytest.mark.asyncio

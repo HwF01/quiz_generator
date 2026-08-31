@@ -193,14 +193,14 @@ export default function PracticePage() {
 
   async function submit() {
     if (!quiz) return;
-    const question_ids = qFilter ? quiz.questions.map((x) => x.id) : undefined;
+    const question_ids = quiz.questions.map((x) => x.id);
     const data = await api<Result>(`/plays/${quiz.id}`, {
       method: "POST",
       body: JSON.stringify({
         answers,
         time_spent: seconds,
         mode: qFilter ? "wrong_retry" : mode,
-        ...(question_ids ? { question_ids } : {}),
+        question_ids,
       }),
     });
     setResult(data);

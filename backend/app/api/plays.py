@@ -20,6 +20,7 @@ from app.models.user import User
 from app.models.wrong_question import WrongQuestion
 from app.schemas.quiz import PlayAnswerUpdateIn, PlaySubmitIn
 from app.services.knowledge_tracing import apply_play, recommend_difficulty
+from app.services.quality_gates import is_practice_eligible
 from app.services.subjective_grading import grade_constructed_response, normalize_answer
 
 router = APIRouter(tags=["practice"])
@@ -75,6 +76,24 @@ def _question_payload(question: Question) -> dict:
     }
 
 
+def _practice_gate_payload(question: Question) -> dict:
+    return {
+        "type": question.type,
+        "options": question.options,
+        "answer": question.answer,
+        "subparts": question.subparts,
+        "needs_review": question.needs_review,
+    }
+
+
+def _is_practice_question(question: Question) -> bool:
+    return is_practice_eligible(_practice_gate_payload(question))
+
+
+def _practice_questions(questions: list[Question]) -> list[Question]:
+    return [question for question in questions if _is_practice_question(question)]
+
+
 def _score_summary(questions: list[Question], answers: dict, ai_grades: dict) -> dict:
     percentages: list[float] = []
     pending = 0
@@ -128,12 +147,15 @@ async def _play_question_details(db: AsyncSession, rec: PlayRecord) -> list[dict
                 ordered_ids.append(str(qid))
                 seen.add(str(qid))
     else:
-        for q in questions:
+        for q in _practice_questions(questions):
             ordered_ids.append(q.id)
             seen.add(q.id)
         for qid in answer_map:
             sid = str(qid)
-            if sid not in seen:
+            if sid in seen:
+                continue
+            existing = by_id.get(sid)
+            if existing is None or _is_practice_question(existing):
                 ordered_ids.append(sid)
                 seen.add(sid)
     details: list[dict] = []
@@ -198,6 +220,9 @@ async def submit_play(
         questions = [q for q in questions if q.id in wanted]
         if not questions:
             raise AppError("题目不存在或不属于该题库")
+    questions = _practice_questions(questions)
+    if not questions:
+        raise AppError("没有可练习的题目")
     details = []
     skill_results: dict[str, list[bool]] = {}
     ai_grades: dict[str, dict] = {}
@@ -313,7 +338,7 @@ async def update_constructed_answer(
         else None,
     }
     rows = await db.execute(select(Question).where(Question.quiz_set_id == rec.quiz_set_id))
-    questions = list(rows.scalars().all())
+    questions = _practice_questions(list(rows.scalars().all()))
     rec.answers = answers
     rec.ai_grades = grades
     rec.score = _score_summary(questions, answers, grades)["score"]
@@ -350,7 +375,7 @@ async def grade_play_question(
     grade["graded_at"] = datetime.now(timezone.utc).isoformat()
     grades[question_id] = grade
     rows = await db.execute(select(Question).where(Question.quiz_set_id == rec.quiz_set_id))
-    questions = list(rows.scalars().all())
+    questions = _practice_questions(list(rows.scalars().all()))
     score_summary = _score_summary(questions, answers, grades)
     rec.ai_grades = grades
     rec.score = score_summary["score"]
