@@ -96,7 +96,12 @@ async def _enqueue_generation(
             job.error = "任务队列暂不可用"
             quiz.status = "failed"
             await db.commit()
-            raise AppError("任务队列暂不可用，请稍后重试", code=503, status_code=503) from exc
+            raise AppError(
+                "任务队列暂不可用，请稍后重试",
+                code=503,
+                status_code=503,
+                data={"job_id": job.id, "quiz_id": quiz.id},
+            ) from exc
     await incr_quota(user.id, user.daily_gen_quota)
     if local_fallback:
         background.add_task(_run_generation_job, job.id)

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError, TimeoutError as SATimeoutError
 from starlette.requests import Request
 
-from app.core.exceptions import AppError, unhandled_error_handler
+from app.core.exceptions import AppError, app_error_handler, unhandled_error_handler
 from app.main import app
 from app.models.document import Document
 from app.models.question import Question
@@ -41,6 +41,19 @@ async def test_unhandled_error_handler_json_body():
     assert res.body
     body = json.loads(res.body)
     assert body == {"code": 500, "data": None, "message": "服务器繁忙，请稍后重试"}
+
+
+async def test_app_error_handler_includes_optional_data():
+    res = await app_error_handler(
+        _dummy_request(),
+        AppError("任务队列暂不可用，请稍后重试", code=503, status_code=503, data={"job_id": "j", "quiz_id": "q"}),
+    )
+    assert res.status_code == 503
+    assert json.loads(res.body) == {
+        "code": 503,
+        "data": {"job_id": "j", "quiz_id": "q"},
+        "message": "任务队列暂不可用，请稍后重试",
+    }
 
 
 async def test_unhandled_error_returns_json_envelope(client: AsyncClient):

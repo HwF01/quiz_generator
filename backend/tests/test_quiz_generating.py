@@ -335,6 +335,8 @@ async def test_enqueue_failure_keeps_failed_draft(client, session_factory, monke
         json={"document_id": doc_id, "title": "队列失败草稿", "blueprint": {"total_questions": 4}},
     )
     assert created.status_code == 503
+    body = created.json()
+    assert body["message"] == "任务队列暂不可用，请稍后重试"
     assert (await _quota(client, headers))["used"] == 0
 
     listed = await client.get("/api/quizzes", headers=headers)
@@ -342,6 +344,8 @@ async def test_enqueue_failure_keeps_failed_draft(client, session_factory, monke
     assert "队列失败草稿" in titles
     row = next(item for item in listed.json()["data"] if item["title"] == "队列失败草稿")
     assert row["status"] == "failed"
+    assert body["data"]["quiz_id"] == row["id"]
+    assert body["data"]["job_id"] == row["generation_job_id"]
 
     async with session_factory() as db:
         quiz = (

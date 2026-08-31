@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, getToken } from "@/lib/api";
+import { api, generationIdsFromError, getToken } from "@/lib/api";
 import { generateSubmitLabel, isGenerateSubmitLocked, isJobInFlight } from "@/lib/generate-button";
 import { isUnnamedTitle, nextUnnamedTitle, withDuplicateSuffix } from "@/lib/quiz-title";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -179,25 +179,43 @@ export default function UploadPage() {
     setTypeCounts((current) => ({ ...current, [kind]: count }));
   }
 
+  function rememberFailedDraft(error: unknown) {
+    const ids = generationIdsFromError(error);
+    if (!ids) return;
+    setJob({
+      id: ids.job_id,
+      status: "failed",
+      progress: 0,
+      stage: "失败",
+      error: error instanceof Error ? error.message : "生成失败",
+      quiz_set_id: ids.quiz_id,
+    });
+  }
+
   async function requestGenerate(id: string, finalTitle: string) {
     if (allocationMode === "manual" && manualCountTotal !== total) {
       return;
     }
     const selection = selectionRef.current;
-    const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
-      method: "POST",
-      body: JSON.stringify({
-        document_id: id,
-        title: finalTitle,
-        category,
-        subject,
-        visibility,
-        blueprint: blueprint(),
-        force,
-      }),
-    });
-    if (selection !== selectionRef.current) return;
-    setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+    try {
+      const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          document_id: id,
+          title: finalTitle,
+          category,
+          subject,
+          visibility,
+          blueprint: blueprint(),
+          force,
+        }),
+      });
+      if (selection !== selectionRef.current) return;
+      setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+    } catch (error) {
+      rememberFailedDraft(error);
+      throw error;
+    }
   }
 
   async function requestRetry(quizId: string, finalTitle: string) {
@@ -205,19 +223,24 @@ export default function UploadPage() {
       return;
     }
     const selection = selectionRef.current;
-    const gen = await api<{ job_id: string; quiz_id: string }>(`/quizzes/${quizId}/retry`, {
-      method: "POST",
-      body: JSON.stringify({
-        title: finalTitle,
-        category,
-        subject,
-        visibility,
-        blueprint: blueprint(),
-        force,
-      }),
-    });
-    if (selection !== selectionRef.current) return;
-    setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+    try {
+      const gen = await api<{ job_id: string; quiz_id: string }>(`/quizzes/${quizId}/retry`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: finalTitle,
+          category,
+          subject,
+          visibility,
+          blueprint: blueprint(),
+          force,
+        }),
+      });
+      if (selection !== selectionRef.current) return;
+      setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
+    } catch (error) {
+      rememberFailedDraft(error);
+      throw error;
+    }
   }
 
   async function submitGenerate(uploadFile: File, finalTitle: string) {
