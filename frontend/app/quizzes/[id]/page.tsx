@@ -9,6 +9,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel, quizStatusLabel } from "@/lib/labels";
+import { isQuizWaitingForQuestions } from "@/lib/quiz-status";
 
 type Question = {
   id: string;
@@ -53,6 +54,15 @@ type Quiz = {
   is_builtin: boolean;
   questions: Question[];
   generation_job_id?: string;
+};
+
+type Job = {
+  id: string;
+  status: string;
+  progress: number;
+  stage: string;
+  error?: string;
+  quiz_set_id?: string;
 };
 
 const REVIEW_REASON_LABELS: Record<string, string> = {
@@ -107,16 +117,79 @@ export default function QuizEditPage() {
   const [onlyNeedsReview, setOnlyNeedsReview] = useState(false);
   const [hardeningId, setHardeningId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [job, setJob] = useState<Job | null>(null);
+  const [generationFailed, setGenerationFailed] = useState(false);
+  const inFlight = Boolean(!generationFailed && quiz && isQuizWaitingForQuestions(quiz));
 
   async function load() {
     const data = await api<Quiz>(`/quizzes/${id}?purpose=review`);
     setQuiz(data);
     setLoadError("");
+    return data;
   }
 
   useEffect(() => {
+    setGenerationFailed(false);
     load().catch((e) => setLoadError(e instanceof Error ? e.message : "加载失败"));
   }, [id]);
+
+  useEffect(() => {
+    if (!inFlight) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    function stopPolling() {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    }
+    async function tick() {
+      try {
+        const data = await load();
+        if (cancelled) return;
+        const jobId = data.generation_job_id;
+        if (!jobId) return;
+        const next = await api<Job>(`/jobs/${jobId}`);
+        if (cancelled) return;
+        setJob(next);
+        if (next.status === "succeeded") {
+          await load();
+        }
+        if (next.status === "failed") {
+          stopPolling();
+          setGenerationFailed(true);
+          setLoadError(next.error || "生成失败");
+          setQuiz(null);
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "";
+        if (message.includes("不存在")) {
+          stopPolling();
+          setLoadError(message || "题库不存在");
+          setQuiz(null);
+        }
+      }
+    }
+    void tick();
+    timer = setInterval(() => void tick(), 1500);
+    return () => {
+      stopPolling();
+    };
+  }, [id, inFlight]);
+
+  useEffect(() => {
+    function refresh() {
+      if (generationFailed) return;
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      load().catch(() => {
+        /* ignore transient errors on focus */
+      });
+    }
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [id, generationFailed]);
 
   const sorted = useMemo(() => {
     if (!quiz) return [];
@@ -229,10 +302,19 @@ export default function QuizEditPage() {
           <p className="text-sm text-slate-500">
             {quiz.category} · {quiz.subject} · {quizStatusLabel(quiz.status)}
           </p>
-          <p className="mt-1 text-sm text-amber-700">待审校 {pendingCount} / {quiz.questions.length} 题</p>
+          {!inFlight && (
+            <p className="mt-1 text-sm text-amber-700">待审校 {pendingCount} / {quiz.questions.length} 题</p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link className="btn-primary" href={`/practice/${quiz.id}`}>
+          <Link
+            className={`btn-primary ${inFlight ? "pointer-events-none opacity-50" : ""}`}
+            href={`/practice/${quiz.id}`}
+            aria-disabled={inFlight}
+            onClick={(event) => {
+              if (inFlight) event.preventDefault();
+            }}
+          >
             开始刷题
           </Link>
           <button
@@ -258,17 +340,28 @@ export default function QuizEditPage() {
         </div>
       </div>
       {msg && <p className="text-sm text-brand-700">{msg}</p>}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="btn-ghost"
-          aria-pressed={onlyNeedsReview}
-          onClick={() => setOnlyNeedsReview((current) => !current)}
-        >
-          {onlyNeedsReview ? "查看全部题目" : "仅看待审校"}
-        </button>
-      </div>
+      {loadError && <p className="text-sm text-red-600">{loadError}</p>}
+      {!inFlight && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn-ghost"
+            aria-pressed={onlyNeedsReview}
+            onClick={() => setOnlyNeedsReview((current) => !current)}
+          >
+            {onlyNeedsReview ? "查看全部题目" : "仅看待审校"}
+          </button>
+        </div>
+      )}
       <div className="space-y-4">
+        {inFlight && (
+          <div className="card p-5" role="status" aria-live="polite">
+            <p className="text-sm text-slate-700">正在生成题目，完成后会自动显示题面。</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {job ? `${job.stage} · ${job.progress}%` : "已排队，正在出题"}
+            </p>
+          </div>
+        )}
         {visibleQuestions.map((q, idx) => (
           <article key={q.id} className={`card p-5 ${q.needs_review ? "border-amber-400" : ""}`}>
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
