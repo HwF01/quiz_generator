@@ -54,12 +54,12 @@ def _answer_prompt(answer: str | list[str]) -> str:
 
 
 def _correct_texts_from_stem(stem_payload: dict) -> list[str]:
-    raw = stem_payload.get("correct_texts")
-    if isinstance(raw, list):
-        texts = answer_texts([str(item) for item in raw])
-        if texts:
-            return texts
-    return answer_texts(str(stem_payload.get("correct_text") or ""))
+    qtype = str(stem_payload.get("type") or "single_choice")
+    if qtype == "multi_choice":
+        raw = stem_payload.get("correct_texts")
+        texts = answer_texts([str(item) for item in raw]) if isinstance(raw, list) else []
+        return texts[:3]
+    return answer_texts(str(stem_payload.get("correct_text") or ""))[:1]
 
 
 async def filter_candidates(
