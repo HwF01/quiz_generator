@@ -255,7 +255,7 @@ def _mock_json(blob: str) -> dict:
         }
     if "不要输出干扰项" in blob or "correct_text" in low:
         type_match = re.search(
-            r"题型：(single_choice|true_false|fill_blank|application|proof|short_answer)",
+            r"题型：(single_choice|multi_choice|true_false|fill_blank|application|proof|short_answer)",
             blob,
         )
         qtype = type_match.group(1) if type_match else "single_choice"
@@ -270,6 +270,14 @@ def _mock_json(blob: str) -> dict:
             "cognitive_level": "understand",
             "source_quote": quote,
         }
+        if qtype == "multi_choice":
+            second = sentences[1] if len(sentences) > 1 else quote
+            alt = second[-12:] if len(second) > 12 else second
+            if not alt or alt == answer:
+                alt = f"{answer}的适用条件"
+            payload["stem"] = f"根据材料，下列关于「{answer}」的说法正确的有哪些？"
+            payload["correct_texts"] = [answer, alt]
+            payload["answer"] = {"texts": [answer, alt]}
         if qtype == "true_false":
             payload["stem"] = f"材料表明：{quote}。"
             payload["answer"] = {"keys": ["对"], "texts": ["对"]}

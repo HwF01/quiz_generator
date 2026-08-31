@@ -145,19 +145,21 @@ async def test_generation_reduces_count_when_key_sentences_are_short(
         assert "可溯源关键句不足" in str((job.models_used or {}).get("shortfall_reason") or "")
 
 
-async def test_generation_failure_deletes_quiz(client, session_factory, fake_redis):
+async def test_generation_failure_keeps_draft(client, session_factory, fake_redis):
     user_id = await _user_id(client, "pipeline-fail@example.com")
-    job_id, quiz_id = await _seed_job(session_factory, user_id, "短", title="失败应删库")
+    job_id, quiz_id = await _seed_job(session_factory, user_id, "短", title="失败应留草稿")
     async with session_factory() as db:
         with pytest.raises(RuntimeError, match="没有适合出题的段落"):
             await run_generation(db, job_id)
 
     async with session_factory() as db:
-        assert await db.get(QuizSet, quiz_id) is None
+        quiz = await db.get(QuizSet, quiz_id)
         job = await db.get(GenerationJob, job_id)
+        assert quiz is not None
+        assert quiz.status == "failed"
         assert job is not None
         assert job.status == "failed"
-        assert job.quiz_set_id is None
+        assert job.quiz_set_id == quiz_id
 
 
 async def test_invalid_external_source_marks_needs_review(

@@ -4,6 +4,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.services.cache import remember_doc_quiz, similar_doc_quiz
 from app.services.llm.providers import _mock_json
+from app.services.quiz_generator import valid_stem_payload
 from app.services.web_search import search_related_knowledge, topic_queries
 
 
@@ -41,6 +42,32 @@ def test_mock_stem_cites_external_sources():
     )
     data = _mock_json(blob)
     assert data["external_source_ids"] == ["web-abc123"]
+
+
+def test_mock_stem_multi_choice_has_two_correct_texts():
+    blob = (
+        "不要输出干扰项\n题型：multi_choice\n"
+        "【待考查文本开始】\n光合作用是绿色植物利用光能的过程。叶绿体是光反应的主要场所。\n【待考查文本结束】\n"
+    )
+    data = _mock_json(blob)
+    assert data["type"] == "multi_choice"
+    assert isinstance(data.get("correct_texts"), list)
+    assert len(data["correct_texts"]) == 2
+    assert len(set(data["correct_texts"])) == 2
+    assert all(str(text).strip() for text in data["correct_texts"])
+
+
+def test_valid_stem_payload_multi_choice_requires_two_distinct_texts():
+    passage = "叶绿体进行光合作用。线粒体进行呼吸作用。"
+    base = {
+        "stem": "下列哪些是细胞器？",
+        "type": "multi_choice",
+        "explanation": "二者都是细胞器。",
+        "source_quote": "叶绿体进行光合作用。线粒体进行呼吸作用。",
+    }
+    assert valid_stem_payload({**base, "correct_texts": ["叶绿体", "线粒体"]}, passage)
+    assert not valid_stem_payload({**base, "correct_texts": ["叶绿体"]}, passage)
+    assert not valid_stem_payload({**base, "correct_texts": ["叶绿体", "叶绿体"]}, passage)
 
 
 def test_topic_queries_only_use_derived_tags():

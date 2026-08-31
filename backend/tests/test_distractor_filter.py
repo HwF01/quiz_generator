@@ -36,6 +36,23 @@ async def test_filter_drops_off_topic():
     assert kept == [] or all("叶绿体" not in c["text"] for c in kept)
 
 
+async def test_filter_drops_near_duplicate_of_any_correct():
+    kept = await filter_candidates(
+        [
+            {"text": "线粒体"},
+            {"text": "核糖体"},
+            {"text": "高尔基体"},
+        ],
+        answer=["叶绿体", "线粒体"],
+        stem="下列哪些是细胞器？",
+        passage="叶绿体进行光合作用。线粒体进行呼吸作用。核糖体合成蛋白质。",
+    )
+    texts = [c["text"] for c in kept]
+    assert "线粒体" not in texts
+    assert "叶绿体" not in texts
+    assert len(texts) >= 1
+
+
 async def test_filter_dashscope_drops_answer_near_dup_and_offtopic(monkeypatch):
     import numpy as np
 
@@ -143,6 +160,128 @@ async def test_insufficient_candidates_create_review_draft_without_placeholder(m
     assert question["options"] is None
     assert question["needs_review"] is True
     assert "distractors_insufficient" in question["quality_scores"]["review_reasons"]
+
+
+@pytest.mark.asyncio
+async def test_single_choice_ignores_extra_correct_texts(monkeypatch):
+    async def _overgenerate(*_args, **_kwargs):
+        return [
+            {"text": "核糖体", "error_type": "张冠李戴", "rationale": "合成蛋白质"},
+            {"text": "高尔基体", "error_type": "同维混淆", "rationale": "加工蛋白质"},
+            {"text": "液泡", "error_type": "范围偏移", "rationale": "储藏物质"},
+        ]
+
+    async def _passthrough(candidates, **_kwargs):
+        return candidates
+
+    async def _validate(candidates, **_kwargs):
+        return candidates, False
+
+    async def _identity(question, _passage, **_kwargs):
+        return question
+
+    monkeypatch.setattr("app.services.distractor_engine.overgenerate", _overgenerate)
+    monkeypatch.setattr("app.services.distractor_engine.filter_candidates", _passthrough)
+    monkeypatch.setattr("app.services.distractor_engine.validate_candidates", _validate)
+    monkeypatch.setattr("app.services.distractor_engine.adversarial_fix", _identity)
+    question = await build_choice_question(
+        {
+            "stem": "光合作用主要发生在哪里？",
+            "type": "single_choice",
+            "correct_text": "叶绿体",
+            "correct_texts": ["叶绿体", "线粒体"],
+            "explanation": "叶绿体是光合作用的场所。",
+            "source_quote": "光合作用发生在叶绿体中，线粒体进行呼吸作用。",
+        },
+        "光合作用发生在叶绿体中，线粒体进行呼吸作用。核糖体合成蛋白质。",
+        "c1",
+    )
+
+    assert question["options"] is not None
+    assert len(question["options"]) == 4
+    assert len(question["answer"]["keys"]) == 1
+    correct = next(opt["text"] for opt in question["options"] if opt["key"] in question["answer"]["keys"])
+    assert correct == "叶绿体"
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_packs_two_correct_keys(monkeypatch):
+    async def _overgenerate(*_args, **_kwargs):
+        return [
+            {"text": "核糖体", "error_type": "张冠李戴", "rationale": "合成蛋白质"},
+            {"text": "高尔基体", "error_type": "同维混淆", "rationale": "加工蛋白质"},
+            {"text": "液泡", "error_type": "范围偏移", "rationale": "储藏物质"},
+        ]
+
+    async def _passthrough(candidates, **_kwargs):
+        return candidates
+
+    async def _validate(candidates, **_kwargs):
+        return candidates, False
+
+    async def _identity(question, _passage, **_kwargs):
+        return question
+
+    monkeypatch.setattr("app.services.distractor_engine.overgenerate", _overgenerate)
+    monkeypatch.setattr("app.services.distractor_engine.filter_candidates", _passthrough)
+    monkeypatch.setattr("app.services.distractor_engine.validate_candidates", _validate)
+    monkeypatch.setattr("app.services.distractor_engine.adversarial_fix", _identity)
+    question = await build_choice_question(
+        {
+            "stem": "下列哪些是细胞器？",
+            "type": "multi_choice",
+            "correct_texts": ["叶绿体", "线粒体"],
+            "correct_text": "叶绿体",
+            "explanation": "二者都是细胞器。",
+            "source_quote": "叶绿体进行光合作用，线粒体进行呼吸作用。",
+        },
+        "叶绿体进行光合作用，线粒体进行呼吸作用。核糖体合成蛋白质。",
+        "c1",
+    )
+
+    assert question["options"] is not None
+    assert len(question["options"]) == 4
+    assert len(question["answer"]["keys"]) == 2
+    texts = {opt["text"] for opt in question["options"]}
+    assert {"叶绿体", "线粒体"} <= texts
+    correct_texts = {
+        opt["text"]
+        for opt in question["options"]
+        if opt["key"] in question["answer"]["keys"]
+    }
+    assert correct_texts == {"叶绿体", "线粒体"}
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_insufficient_distractors_create_review_draft(monkeypatch):
+    async def _overgenerate(*_args, **_kwargs):
+        return [{"text": "核糖体", "error_type": "张冠李戴"}]
+
+    async def _passthrough(candidates, **_kwargs):
+        return candidates
+
+    async def _validate(candidates, **_kwargs):
+        return candidates, False
+
+    monkeypatch.setattr("app.services.distractor_engine.overgenerate", _overgenerate)
+    monkeypatch.setattr("app.services.distractor_engine.filter_candidates", _passthrough)
+    monkeypatch.setattr("app.services.distractor_engine.validate_candidates", _validate)
+    question = await build_choice_question(
+        {
+            "stem": "下列哪些是细胞器？",
+            "type": "multi_choice",
+            "correct_texts": ["叶绿体", "线粒体"],
+            "explanation": "二者都是细胞器。",
+            "source_quote": "叶绿体进行光合作用，线粒体进行呼吸作用。",
+        },
+        "叶绿体进行光合作用，线粒体进行呼吸作用。",
+        "c1",
+    )
+
+    assert question["options"] is None
+    assert question["needs_review"] is True
+    assert "distractors_insufficient" in question["quality_scores"]["review_reasons"]
+    assert question["answer"]["texts"] == ["叶绿体", "线粒体"]
 
 
 @pytest.mark.asyncio

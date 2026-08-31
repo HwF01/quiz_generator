@@ -451,9 +451,9 @@ export default function QuizEditPage() {
                 ))}
               </ul>
             )}
-            {!q.options && q.type === "single_choice" && (
+            {!q.options && (q.type === "single_choice" || q.type === "multi_choice") && (
               <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-                此题尚无可用选项。请手动补全 3 个确定错误的干扰项，或重新生成干扰项。
+                此题尚无可用选项。请手动补全确定错误的干扰项，或重新生成干扰项。
               </p>
             )}
             {q.needs_review && (q.quality_scores?.review_reasons?.length || q.quality_scores?.comment) && (
@@ -522,7 +522,7 @@ export default function QuizEditPage() {
               <button className="btn-ghost" onClick={() => openEdit(q)}>
                 手动修改
               </button>
-              {q.type === "single_choice" && (
+              {(q.type === "single_choice" || q.type === "multi_choice") && (
                 <button
                   className="btn-ghost"
                   disabled={hardeningId === q.id}

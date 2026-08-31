@@ -30,6 +30,8 @@ def valid_stem_payload(payload: object, passage: str) -> bool:
     question_type = str(payload.get("type") or "")
     if question_type == "single_choice":
         return bool(str(payload.get("correct_text") or "").strip())
+    if question_type == "multi_choice":
+        return _valid_multi_correct_texts(payload.get("correct_texts"))
     if question_type == "true_false":
         keys = (payload.get("answer") or {}).get("keys") or []
         return bool(
@@ -38,6 +40,16 @@ def valid_stem_payload(payload: object, passage: str) -> bool:
             and str(keys[0]) in {"对", "错"}
         )
     return _valid_constructed_answer(payload)
+
+
+def _valid_multi_correct_texts(value: object) -> bool:
+    if not isinstance(value, list) or len(value) not in {2, 3}:
+        return False
+    cleaned = [str(text).strip() for text in value]
+    if any(not text for text in cleaned):
+        return False
+    norms = [_normalized(text) for text in cleaned]
+    return len(set(norms)) == len(norms)
 
 
 def _valid_constructed_answer(payload: dict) -> bool:

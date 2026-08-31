@@ -3,6 +3,7 @@
 
 # 题型要求
 - `single_choice`：输出单选题题干和唯一 `correct_text`，不输出 options / choices / A、B、C、D。
+- `multi_choice`：输出多选题题干和 `correct_texts`（2 或 3 条互异正解文本），不输出 options / choices / A、B、C、D。每条正解都必须能由材料独立支撑，且不能互为同义改写。
 - `true_false`：输出判断题题干，`answer.keys` 只能为 `["对"]` 或 `["错"]`。
 - `fill_blank`：输出可多小问的填空题。每个小问要有 `id`、`prompt` 和对应的可接受答案 `texts`。
 - `application`、`proof`、`short_answer`：输出可多小问的应用、证明或简答题。每个小问要有 `id`、`prompt` 和对应的 `expected_points` 正解要点。
@@ -25,7 +26,8 @@
       {"id": "p1", "texts": ["填空可接受答案"], "expected_points": ["主观题正解要点"]}
     ]
   },
-  "correct_text": "选择题或判断题的正确答案文本",
+  "correct_text": "单选题或判断题的正确答案文本",
+  "correct_texts": ["多选题正解一", "多选题正解二"],
   "subparts": [
     {"id": "p1", "prompt": "第 1 小问"}
   ],
@@ -38,7 +40,8 @@
 }
 
 # 警告
-- 除 `single_choice` / `true_false` 外，必须返回 `subparts`，其 ID 与 `answer.subparts` 完全一致。
+- 除 `single_choice` / `multi_choice` / `true_false` 外，必须返回 `subparts`，其 ID 与 `answer.subparts` 完全一致。
 - 不要输出干扰项列表、评分量规或未给出的来源 ID。
 - 不要编造原文或外部参考资料没有的事实。
 - 判断题 answer.keys 只用 ["对"] 或 ["错"]，不要用 true/false。
+- 多选题 `correct_texts` 必须是 2 或 3 条互异文本，不要只给一条。

@@ -61,6 +61,24 @@ def test_choice_structure_requires_four_distinct_options_and_one_key():
     assert not choice_structure_valid(question)
 
 
+def test_multi_choice_structure_requires_two_to_three_keys():
+    question = {
+        "type": "multi_choice",
+        "options": [
+            {"key": "A", "text": "叶绿体"},
+            {"key": "B", "text": "线粒体"},
+            {"key": "C", "text": "核糖体"},
+            {"key": "D", "text": "高尔基体"},
+        ],
+        "answer": {"keys": ["A", "B"]},
+    }
+    assert choice_structure_valid(question)
+    question["answer"] = {"keys": ["A"]}
+    assert not choice_structure_valid(question)
+    question["answer"] = {"keys": ["A", "B", "C", "D"]}
+    assert not choice_structure_valid(question)
+
+
 def test_constructed_question_requires_matching_subparts_and_rubric():
     question = {
         "type": "proof",

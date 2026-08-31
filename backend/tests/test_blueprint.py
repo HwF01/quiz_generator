@@ -19,6 +19,12 @@ def test_allocate_only_choice_and_true_false():
     assert "fill_blank" not in {a["type"] for a in allocs}
 
 
+def test_default_mix_can_allocate_multi_choice():
+    bp = QuizBlueprint(total_questions=12)
+    allocs = allocate(12, bp)
+    assert "multi_choice" in {a["type"] for a in allocs}
+
+
 def test_allocate_keeps_quality_first_count_when_items_are_few():
     bp = QuizBlueprint(total_questions=8)
     allocs = allocate(6, bp)
@@ -54,10 +60,22 @@ def test_auto_allocation_uses_subject_matrix_and_target_difficulty():
     assert {item["difficulty"] for item in allocs} == {"hard"}
     assert allowed_question_types(["humanities"]) == [
         "single_choice",
+        "multi_choice",
         "true_false",
         "fill_blank",
         "short_answer",
     ]
+
+
+def test_manual_allocation_keeps_multi_choice_counts():
+    bp = QuizBlueprint(
+        total_questions=4,
+        allocation_mode="manual",
+        type_counts={"multi_choice": 3, "single_choice": 1},
+    )
+    allocs = allocate(4, bp, subject_tags=["humanities"])
+    assert [item["type"] for item in allocs].count("multi_choice") == 3
+    assert [item["type"] for item in allocs].count("single_choice") == 1
 
 
 def test_enforce_detail_cap_drops_low_usability():
