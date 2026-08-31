@@ -232,7 +232,6 @@ async def seed() -> None:
                 category=pack["category"],
                 subject=pack["subject"],
                 visibility="public",
-                is_public=True,
                 is_builtin=True,
                 status="ready",
                 question_count=len(pack["questions"]),

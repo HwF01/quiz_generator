@@ -11,7 +11,7 @@ LEGACY_SEED_EMAILS = frozenset({"system@quiz.local", "system@quiz.example"})
 def quiz_is_accessible(quiz: QuizSet | None, user: User | None) -> bool:
     if quiz is None:
         return False
-    if quiz.is_public or quiz.is_builtin:
+    if quiz.visibility == "public" or quiz.is_builtin:
         return True
     if user is not None and quiz.creator_id == user.id:
         return True

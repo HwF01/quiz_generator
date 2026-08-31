@@ -20,7 +20,6 @@ async def test_private_quiz_play_is_404(client: AsyncClient, session_factory):
             creator_id=owner_id,
             title="私有",
             visibility="private",
-            is_public=False,
             status="ready",
             question_count=1,
         )
@@ -106,7 +105,6 @@ async def test_delete_quiz_with_play_record(client: AsyncClient, session_factory
             creator_id=user_id,
             title="可删",
             visibility="private",
-            is_public=False,
             status="ready",
             question_count=1,
         )

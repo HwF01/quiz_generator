@@ -173,7 +173,6 @@ async def generate(
         category=body.category,
         subject=body.subject if body.subject != "auto" else "general",
         visibility=body.visibility,
-        is_public=body.visibility == "public",
         status="generating",
         blueprint=body.blueprint.model_dump(),
     )
@@ -323,7 +322,6 @@ async def patch_quiz(
             if pending:
                 raise AppError("题库仍有待审校题目，完成审校后才能公开", code=400)
         quiz.visibility = body.visibility
-        quiz.is_public = body.visibility == "public"
     await db.commit()
     return ok(_quiz_out(quiz))
 
@@ -545,10 +543,7 @@ async def rate_quiz(
                 user_id=user.id, quiz_set_id=quiz_id, score=body.score, comment=body.comment
             )
         )
-    shared_to_plaza = bool(quiz.is_builtin or quiz.is_public or quiz.visibility == "public")
-    if not quiz.is_builtin and (quiz.visibility == "public" or quiz.is_public):
-        quiz.visibility = "public"
-        quiz.is_public = True
+    shared_to_plaza = bool(quiz.is_builtin or quiz.visibility == "public")
     await db.commit()
     avg = await db.scalar(
         select(func.avg(QuizRating.score)).where(QuizRating.quiz_set_id == quiz_id)

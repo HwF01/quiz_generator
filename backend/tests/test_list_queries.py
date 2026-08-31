@@ -37,7 +37,6 @@ async def _seed_public_quizzes(session_factory, creator_id: str, n: int) -> list
                 description=f"描述{i}",
                 category="常识",
                 visibility="public",
-                is_public=True,
                 status="ready",
                 question_count=1,
                 likes=i,
@@ -183,3 +182,90 @@ async def test_my_quizzes_include_favorited(client: AsyncClient, session_factory
     assert body[quizzes[0].id]["favorited"] is True
     assert body[quizzes[1].id]["favorited"] is False
     assert len([s for s in statements if "favorites" in s.lower()]) == 1
+
+
+async def test_plaza_lists_quiz_with_only_visibility_public(client: AsyncClient, session_factory):
+    data = await register(client, "plaza-vis@example.com")
+    creator_id = await _user_id(client, data["token"])
+    async with session_factory() as db:
+        quiz = QuizSet(
+            creator_id=creator_id,
+            title="仅 visibility 公开",
+            status="ready",
+            visibility="public",
+        )
+        db.add(quiz)
+        await db.commit()
+        quiz_id = quiz.id
+
+    res = await client.get("/api/plaza")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["code"] == 0
+    by_id = {row["id"]: row for row in body["data"]}
+    assert quiz_id in by_id
+    assert by_id[quiz_id]["title"] == "仅 visibility 公开"
+
+    cats = await client.get("/api/plaza/categories")
+    assert cats.status_code == 200
+    assert any(row["count"] >= 1 for row in cats.json()["data"])
+
+
+async def test_patch_visibility_roundtrips_plaza(client: AsyncClient, session_factory):
+    data = await register(client, "plaza-patch@example.com")
+    token = data["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = await _user_id(client, token)
+    async with session_factory() as db:
+        quiz = QuizSet(
+            creator_id=user_id,
+            title="审校后公开",
+            status="ready",
+            visibility="private",
+        )
+        db.add(quiz)
+        await db.flush()
+        db.add(
+            Question(
+                quiz_set_id=quiz.id,
+                type="single_choice",
+                content="已审校题",
+                options=[
+                    {"key": "A", "text": "对"},
+                    {"key": "B", "text": "错1"},
+                    {"key": "C", "text": "错2"},
+                    {"key": "D", "text": "错3"},
+                ],
+                answer={"keys": ["A"]},
+                micro_skill="detail",
+                needs_review=False,
+            )
+        )
+        await db.commit()
+        quiz_id = quiz.id
+
+    published = await client.patch(
+        f"/api/quizzes/{quiz_id}",
+        headers=headers,
+        json={"visibility": "public"},
+    )
+    assert published.status_code == 200
+    pub_body = published.json()["data"]
+    assert pub_body["visibility"] == "public"
+    assert pub_body["is_public"] is True
+
+    plaza = await client.get("/api/plaza")
+    assert any(row["id"] == quiz_id for row in plaza.json()["data"])
+
+    hidden = await client.patch(
+        f"/api/quizzes/{quiz_id}",
+        headers=headers,
+        json={"visibility": "private"},
+    )
+    assert hidden.status_code == 200
+    hid_body = hidden.json()["data"]
+    assert hid_body["visibility"] == "private"
+    assert hid_body["is_public"] is False
+
+    plaza_after = await client.get("/api/plaza")
+    assert all(row["id"] != quiz_id for row in plaza_after.json()["data"])

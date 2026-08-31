@@ -1,4 +1,5 @@
 from sqlalchemy import Boolean, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -19,7 +20,6 @@ class QuizSet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     category: Mapped[str] = mapped_column(String(50), default="自定义")
     subject: Mapped[str] = mapped_column(String(50), default="general")
     visibility: Mapped[str] = mapped_column(String(20), default="private")
-    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(30), default="draft")
     source_doc_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -28,3 +28,11 @@ class QuizSet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     likes: Mapped[int] = mapped_column(Integer, default=0)
     plays: Mapped[int] = mapped_column(Integer, default=0)
     blueprint: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    @hybrid_property
+    def is_public(self) -> bool:
+        return self.visibility == "public"
+
+    @is_public.expression
+    def is_public(cls):
+        return cls.visibility == "public"
