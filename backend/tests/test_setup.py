@@ -51,6 +51,17 @@ def test_setup_status_self_review_when_single_live_key(restore_settings):
     assert setup_status()["self_review"] is False
 
 
+def test_setup_status_anthropic_only_is_not_self_review(restore_settings):
+    object.__setattr__(settings, "mock_llm", False)
+    object.__setattr__(settings, "qwen_api_key", "")
+    object.__setattr__(settings, "deepseek_api_key", "")
+    object.__setattr__(settings, "openai_api_key", "")
+    object.__setattr__(settings, "anthropic_api_key", "sk-ant")
+    data = setup_status()
+    assert data["llm_mode"] == "live"
+    assert data["self_review"] is False
+
+
 def test_upsert_env_values_preserves_other_keys(tmp_path):
     path = tmp_path / "config.env"
     path.write_text("SECRET_KEY=keep\nQWEN_API_KEY=old\n", encoding="utf-8")

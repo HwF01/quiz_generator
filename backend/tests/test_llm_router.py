@@ -9,6 +9,7 @@ from app.services.llm.router import (
     complete_json,
     critic_provider,
     generator_provider,
+    is_self_review_config,
 )
 
 _SETTING_KEYS = (
@@ -59,6 +60,7 @@ def test_qwen_only_civics_uses_sibling_model_and_self_review(live_llm):
     assert roles.critic.model != roles.generator.model
     assert roles.self_review is True
     assert getattr(roles.critic, "temperature_delta", 0) == 0.0
+    assert is_self_review_config() is True
 
 
 def test_deepseek_only_science_self_reviews_with_temperature_delta(live_llm):
@@ -84,6 +86,7 @@ def test_qwen_and_deepseek_cross_by_subject(live_llm):
     assert science.generator.name == "deepseek"
     assert science.critic.name == "qwen"
     assert science.self_review is False
+    assert is_self_review_config() is False
 
 
 def test_qwen_and_anthropic_critic_is_claude(live_llm):
@@ -95,6 +98,15 @@ def test_qwen_and_anthropic_critic_is_claude(live_llm):
     assert critic_provider("civics").name == "claude"
 
 
+def test_anthropic_only_is_not_self_review(live_llm):
+    _set_keys(anthropic="sk-ant")
+    roles = assign_roles("civics")
+    assert roles.generator.name == "mock"
+    assert roles.critic.name == "claude"
+    assert roles.self_review is False
+    assert is_self_review_config() is False
+
+
 def test_mock_roles_are_not_self_review(live_llm):
     object.__setattr__(settings, "mock_llm", True)
     _set_keys(qwen="sk-qwen")
@@ -102,6 +114,7 @@ def test_mock_roles_are_not_self_review(live_llm):
     assert generator_provider("civics").name == "mock"
     assert critic_provider("civics").name == "mock"
     assert roles.self_review is False
+    assert is_self_review_config() is False
 
 
 class _RecordingProvider:

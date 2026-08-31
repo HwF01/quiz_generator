@@ -51,7 +51,11 @@ def _configured_vendors() -> set[str]:
 def is_self_review_config() -> bool:
     if settings.use_mock_llm:
         return False
-    return len(_configured_vendors()) < 2
+    vendors = _configured_vendors()
+    gen_vendor = _generator_vendor("general", vendors)
+    if not gen_vendor:
+        return False
+    return _critic_vendor(gen_vendor, vendors) == gen_vendor
 
 
 def _make_provider(
