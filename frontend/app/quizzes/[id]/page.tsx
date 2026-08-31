@@ -7,6 +7,7 @@ import { api, downloadAuth, getToken } from "@/lib/api";
 import { formatOptionLabel } from "@/lib/options";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
+import { ErrorDialog } from "@/components/ErrorDialog";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel, quizStatusLabel } from "@/lib/labels";
 import { isQuizWaitingForQuestions } from "@/lib/quiz-status";
@@ -111,6 +112,7 @@ export default function QuizEditPage() {
   const { id } = useParams<{ id: string }>();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [msg, setMsg] = useState("");
+  const [actionError, setActionError] = useState("");
   const [editing, setEditing] = useState<Question | null>(null);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState("");
@@ -219,7 +221,7 @@ export default function QuizEditPage() {
       await saveQuestion(q, { needs_review: !q.needs_review });
       setMsg(q.needs_review ? "已标记为已审" : "已标记待审");
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "更新审校状态失败");
+      setActionError(e instanceof Error ? e.message : "更新审校状态失败");
     }
   }
 
@@ -230,7 +232,7 @@ export default function QuizEditPage() {
       setMsg("已重新生成干扰项，请核对审校结果");
       await load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "重新生成干扰项失败");
+      setActionError(e instanceof Error ? e.message : "重新生成干扰项失败");
     } finally {
       setHardeningId(null);
     }
@@ -276,7 +278,7 @@ export default function QuizEditPage() {
           : prev
       );
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "收藏失败");
+      setActionError(e instanceof Error ? e.message : "收藏失败");
     }
   }
 
@@ -506,6 +508,7 @@ export default function QuizEditPage() {
           onSave={(patch) => void saveEdit(patch)}
         />
       )}
+      <ErrorDialog open={Boolean(actionError)} description={actionError} onClose={() => setActionError("")} />
     </div>
   );
 }

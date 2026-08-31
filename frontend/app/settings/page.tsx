@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
+import { ErrorDialog } from "@/components/ErrorDialog";
 import type { SetupStatus } from "@/lib/labels";
 
 export default function SettingsPage() {
@@ -14,6 +15,7 @@ export default function SettingsPage() {
   const [useDemo, setUseDemo] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -33,7 +35,7 @@ export default function SettingsPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!status?.editable) return;
-    setErr("");
+    setActionError("");
     setMsg("");
     setBusy(true);
     try {
@@ -53,7 +55,7 @@ export default function SettingsPage() {
       setUseDemo(next.llm_mode === "mock");
       setMsg("已保存。新配置立即生效，无需重启。");
     } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "保存失败");
+      setActionError(ex instanceof Error ? ex.message : "保存失败");
     } finally {
       setBusy(false);
     }
@@ -61,7 +63,7 @@ export default function SettingsPage() {
 
   async function clearTavily() {
     if (!status?.editable) return;
-    setErr("");
+    setActionError("");
     setMsg("");
     setBusy(true);
     try {
@@ -73,7 +75,7 @@ export default function SettingsPage() {
       setTavily("");
       setMsg("已清除 Tavily Key，联网补充已关闭。");
     } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "清除失败");
+      setActionError(ex instanceof Error ? ex.message : "清除失败");
     } finally {
       setBusy(false);
     }
@@ -171,17 +173,13 @@ export default function SettingsPage() {
               {msg}
             </p>
           )}
-          {err && (
-            <p className="text-sm text-red-600" role="alert">
-              {err}
-            </p>
-          )}
           <button className="btn-primary" disabled={busy}>
             {busy ? "保存中…" : "保存"}
           </button>
         </form>
       )}
       {err && !status && <p className="text-sm text-red-600">{err}</p>}
+      <ErrorDialog open={Boolean(actionError)} description={actionError} onClose={() => setActionError("")} />
     </div>
   );
 }

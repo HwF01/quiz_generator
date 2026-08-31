@@ -6,6 +6,7 @@ import { api, getToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { PlayDetailDialog, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ErrorDialog } from "@/components/ErrorDialog";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { quizStatusLabel } from "@/lib/labels";
@@ -141,6 +142,7 @@ export default function ProfilePage() {
       setQuizzes((prev) => prev.filter((q) => q.id !== pendingQuizId));
       setPendingQuizId(null);
     } catch (e) {
+      setPendingQuizId(null);
       setQuizError(e instanceof Error ? e.message : "删除失败");
     } finally {
       setBusyId(null);
@@ -161,6 +163,7 @@ export default function ProfilePage() {
       setDetail((prev) => (prev?.id === pendingPlayId ? null : prev));
       setPendingPlayId(null);
     } catch (e) {
+      setPendingPlayId(null);
       setDetailError(e instanceof Error ? e.message : "删除失败");
     } finally {
       setBusyId(null);
@@ -184,12 +187,12 @@ export default function ProfilePage() {
       <div>
         <h1 className="text-2xl font-semibold">题库管理/审校</h1>
         <p className="text-sm text-slate-500">
-          {me?.nickname || "我的主页"} · {me?.email} · 今日剩余生成 {me?.quota?.remaining ?? "-"} / {me?.quota?.limit ?? "-"}
+{me?.nickname ? `${me.nickname} · ` : ""}
+          {me?.email} · 今日剩余生成 {me?.quota?.remaining ?? "-"} / {me?.quota?.limit ?? "-"}
         </p>
       </div>
       <section>
         <h2 className="mb-3 font-medium">我创建的</h2>
-        {quizError ? <p className="mb-3 text-sm text-red-600">{quizError}</p> : null}
         <div className="grid gap-3 md:grid-cols-2">
           {quizzes.map((q) => (
             <article key={q.id} className="card p-4">
@@ -230,7 +233,6 @@ export default function ProfilePage() {
           <h2 className="font-medium">刷题记录</h2>
           {plays.length > 0 && <span className="text-xs text-slate-400">{plays.length} 次</span>}
         </div>
-        {detailError && <p className="mb-3 text-sm text-red-600">{detailError}</p>}
         <div className="space-y-3">
           {plays.map((p) => (
             <article key={p.id} className="card p-4 sm:p-5">
@@ -292,6 +294,14 @@ export default function ProfilePage() {
         busy={busyId === pendingQuizId}
         onCancel={() => !busyId && setPendingQuizId(null)}
         onConfirm={() => void confirmRemoveQuiz()}
+      />
+      <ErrorDialog
+        open={Boolean(quizError || detailError)}
+        description={quizError || detailError}
+        onClose={() => {
+          setQuizError("");
+          setDetailError("");
+        }}
       />
     </div>
   );

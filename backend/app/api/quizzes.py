@@ -4,6 +4,7 @@ from typing import Literal
 from arq import create_pool
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.acl import assert_quiz_accessible
@@ -223,9 +224,9 @@ async def my_favorites(
         .join(Favorite, Favorite.quiz_set_id == QuizSet.id)
         .where(Favorite.user_id == user.id, QuizSet.status != "failed")
     )
-quizzes = list(rows.scalars().all())
-counts = await _question_counts(db, [q.id for q in quizzes])
-return ok([_quiz_out(quiz, {"favorited": True, "question_count": counts.get(quiz.id, 0)}) for quiz in quizzes])
+    quizzes = list(rows.scalars().all())
+    counts = await _question_counts(db, [q.id for q in quizzes])
+    return ok([_quiz_out(quiz, {"favorited": True, "question_count": counts.get(quiz.id, 0)}) for quiz in quizzes])
 
 
 
@@ -241,9 +242,9 @@ async def my_quizzes(
     )
     quizzes = list(rows.scalars().all())
     visible = [q for q in quizzes if q.status != "failed"]
-fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
-counts = await _question_counts(db, [q.id for q in visible])
-return ok([_quiz_out(q, {"favorited": q.id in fav_ids, "question_count": counts.get(q.id, 0)}) for q in visible])
+    fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
+    counts = await _question_counts(db, [q.id for q in visible])
+    return ok([_quiz_out(q, {"favorited": q.id in fav_ids, "question_count": counts.get(q.id, 0)}) for q in visible])
 
 
 
@@ -440,7 +441,10 @@ async def toggle_question_favorite(
                 user_id=user.id, question_id=question_id, quiz_set_id=q.quiz_set_id
             )
         )
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
         favorited = True
     return ok({"favorited": favorited})
 
@@ -483,8 +487,13 @@ async def harden_question(
         for opt in q.options:
             if opt.get("key") in correct_keys:
                 stem["correct_text"] = opt.get("text")
-    rebuilt = await build_choice_question(stem, passage, q.source_chunk_id or "")
-    rebuilt = await apply_gates(rebuilt, passage)
+    try:
+        rebuilt = await build_choice_question(stem, passage, q.source_chunk_id or "")
+        rebuilt = await apply_gates(rebuilt, passage)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError("重新生成干扰项暂不可用，请稍后重试", code=503, status_code=503) from exc
     q.options = rebuilt.get("options")
     q.answer = rebuilt.get("answer") or q.answer
     q.distractor_rationale = rebuilt.get("distractor_rationale")
@@ -510,7 +519,10 @@ async def toggle_favorite(
         return ok({"favorited": False})
     db.add(Favorite(user_id=user.id, quiz_set_id=quiz_id))
     quiz.likes += 1
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
     return ok({"favorited": True})
 
 

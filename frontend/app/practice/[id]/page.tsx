@@ -9,6 +9,7 @@ import { Star } from "lucide-react";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { PlayDetailCards, type PlayDetail } from "@/components/PlayDetailDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ErrorDialog } from "@/components/ErrorDialog";
 import { CardSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel } from "@/lib/labels";
 
@@ -309,7 +310,8 @@ export default function PracticePage() {
       );
       setRateMsg(data.shared_to_plaza ? "评分已同步到社区广场" : "已评分");
     } catch (e) {
-      setRateMsg(e instanceof Error ? e.message : "评分失败");
+      setRateMsg("");
+      setMsg(e instanceof Error ? e.message : "评分失败");
     } finally {
       setRateBusy(false);
     }
@@ -346,6 +348,7 @@ export default function PracticePage() {
     const gradedTotal = playDetail?.graded_total ?? result.graded_total ?? total;
     const pendingAiGrading = playDetail?.pending_ai_grading ?? result.pending_ai_grading ?? 0;
     return (
+      <>
       <div className="space-y-4">
         <div className="card space-y-3 p-4 sm:p-6">
           <h1 className="text-2xl font-semibold break-words">{quiz.title}</h1>
@@ -358,7 +361,6 @@ export default function PracticePage() {
           {result.weak_skills.length > 0 && (
             <p className="text-sm text-amber-700">薄弱微技能：{result.weak_skills.join("、")}</p>
           )}
-          {msg && <p className="text-sm text-red-600">{msg}</p>}
         </div>
         {playDetail ? (
           <PlayDetailCards
@@ -401,9 +403,7 @@ export default function PracticePage() {
                 </button>
               ))}
             </div>
-            {rateMsg && (
-              <p className={`text-sm ${rateMsg.includes("失败") ? "text-red-600" : "text-emerald-700"}`}>{rateMsg}</p>
-            )}
+            {rateMsg ? <p className="text-sm text-emerald-700">{rateMsg}</p> : null}
           </div>
         )}
         <div className="flex flex-wrap gap-2">
@@ -415,6 +415,8 @@ export default function PracticePage() {
           </Link>
         </div>
       </div>
+      <ErrorDialog open={Boolean(msg)} description={msg} onClose={() => setMsg("")} />
+      </>
     );
   }
 
@@ -442,7 +444,6 @@ export default function PracticePage() {
       </div>
       <p className="break-words text-lg">{q.content}</p>
       <p className="text-xs text-slate-400">微技能 {microSkillLabel(q.micro_skill)}</p>
-      {msg && <p className="text-sm text-red-600">{msg}</p>}
       {isConstructedQuestion(q) ? (
         <fieldset className="space-y-3">
           <legend className="text-sm font-medium text-slate-700">请逐小问作答</legend>
@@ -544,6 +545,7 @@ export default function PracticePage() {
       onCancel={cancelPendingSubmit}
       onConfirm={() => void submit()}
     />
+    <ErrorDialog open={Boolean(msg)} description={msg} onClose={() => setMsg("")} />
     </>
   );
 }

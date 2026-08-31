@@ -32,7 +32,7 @@ export async function downloadAuth(path: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function messageFromResponse(status: number, text: string): string {
+export function messageFromResponse(status: number, text: string): string {
   const trimmed = text.trim();
   if (trimmed) {
     try {
@@ -43,8 +43,10 @@ function messageFromResponse(status: number, text: string): string {
       /* plaintext / HTML / proxy 500 */
     }
   }
+  if (status === 504) return "请求超时，请稍后重试";
+  if (status === 502) return "服务暂不可达，请稍后重试";
   if (status >= 500 || /^internal server error$/i.test(trimmed) || trimmed.startsWith("<")) {
-    return "服务器繁忙，请稍后重试";
+    return "服务暂时不可用，请稍后重试";
   }
   if (!trimmed) return "请求失败";
   return trimmed.length > 160 ? "请求失败" : trimmed;
@@ -57,11 +59,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(path.startsWith("/api") ? path : `/api${path}`, {
-    cache: "no-store",
-    ...init,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path.startsWith("/api") ? path : `/api${path}`, {
+      cache: "no-store",
+      ...init,
+      headers,
+    });
+  } catch {
+    throw new Error("网络异常，请检查连接后重试");
+  }
   const text = await res.text();
   let json: ApiEnvelope<T> | null = null;
   if (text.trim()) {

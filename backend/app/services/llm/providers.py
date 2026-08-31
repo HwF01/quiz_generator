@@ -7,6 +7,7 @@ import re
 import httpx
 
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.services.llm.base import ChatMessage, ChatProvider
 
 _http: httpx.AsyncClient | None = None
@@ -36,7 +37,7 @@ async def _post_with_retry(url: str, **kwargs) -> httpx.Response:
             last_exc = exc
             await asyncio.sleep(0.4 * (attempt + 1))
     assert last_exc is not None
-    raise last_exc
+    raise AppError("模型服务暂不可用，请稍后重试", code=503, status_code=503) from last_exc
 
 
 class OpenAICompatibleProvider:

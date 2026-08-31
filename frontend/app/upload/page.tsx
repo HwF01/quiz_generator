@@ -6,6 +6,7 @@ import { api, getToken } from "@/lib/api";
 import { generateSubmitLabel, isGenerateSubmitLocked, isJobInFlight } from "@/lib/generate-button";
 import { isUnnamedTitle, nextUnnamedTitle, withDuplicateSuffix } from "@/lib/quiz-title";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ErrorDialog } from "@/components/ErrorDialog";
 import type { SetupStatus } from "@/lib/labels";
 import Link from "next/link";
 
@@ -178,7 +179,6 @@ export default function UploadPage() {
 
   async function requestGenerate(id: string, finalTitle: string) {
     if (allocationMode === "manual" && manualCountTotal !== total) {
-      setErr("各题型数量之和必须等于总题量");
       return;
     }
     const selection = selectionRef.current;
@@ -473,7 +473,6 @@ export default function UploadPage() {
           强制重新出题（忽略相似文档复用）
         </label>
         {notice && <p className="text-sm text-emerald-700" role="status" aria-live="polite">{notice}</p>}
-        {err && <p className="text-sm text-red-600" role="alert">{err}</p>}
         <button
           type="button"
           className="btn-primary w-full"
@@ -520,6 +519,7 @@ export default function UploadPage() {
         onCancel={() => !busy && setDupPrompt(null)}
         onConfirm={() => void confirmDuplicate()}
       />
+      <ErrorDialog open={Boolean(err)} description={err} onClose={() => setErr("")} />
     </div>
   );
 }
