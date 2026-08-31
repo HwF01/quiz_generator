@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, UploadFile, File
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -89,6 +90,8 @@ async def generation_preview(
         raise AppError(str(exc), code=400) from exc
     except httpx.HTTPError as exc:
         raise AppError("模型服务暂不可用，请稍后重试", code=503, status_code=503) from exc
+    except SQLAlchemyError:
+        raise
     except Exception as exc:
         raise AppError("材料解析失败，请稍后重试", code=503, status_code=503) from exc
     preview["web_search_available"] = settings.web_search_available

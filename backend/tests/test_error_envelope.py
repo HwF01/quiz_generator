@@ -228,6 +228,40 @@ async def test_generation_preview_parse_failure_is_app_error(client, session_fac
     assert res.json()["message"] == "材料解析失败，请稍后重试"
 
 
+async def test_generation_preview_db_error_is_not_parse_failure(client, session_factory, monkeypatch):
+    data = await register(client, "previewdb@example.com")
+    token = data["token"]
+    me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    user_id = me.json()["data"]["id"]
+    async with session_factory() as db:
+        doc = Document(
+            owner_id=user_id,
+            filename="lesson.txt",
+            content_type="text/plain",
+            object_key="lesson.txt",
+            size_bytes=20,
+            status="parsed",
+            extracted_text="叶绿体进行光合作用，线粒体进行呼吸作用。",
+        )
+        db.add(doc)
+        await db.commit()
+        doc_id = doc.id
+
+    async def boom(*_a, **_k):
+        raise OperationalError("COMMIT", {}, Exception("database is locked"))
+
+    monkeypatch.setattr("app.api.documents.prepare_generation_preview", boom)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        res = await ac.post(
+            f"/api/documents/{doc_id}/generation-preview",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"subject": "auto", "blueprint": {}},
+        )
+    assert res.status_code == 503
+    assert res.json()["message"] == "数据库繁忙，请稍后重试"
+
+
 async def test_harden_llm_failure_is_app_error(client, session_factory, monkeypatch):
     registered = await register(client, "hardenfail@example.com")
     token = registered["token"]
