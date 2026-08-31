@@ -4,6 +4,7 @@ import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, setToken } from "@/lib/api";
+import { ErrorDialog } from "@/components/ErrorDialog";
 import { safeNextPath } from "@/lib/labels";
 
 function LoginForm() {
@@ -29,6 +30,7 @@ function LoginForm() {
   }
 
   return (
+    <>
     <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-6 sm:p-8">
       <h1 className="text-xl font-semibold">登录</h1>
       <label className="block space-y-1.5">
@@ -54,12 +56,13 @@ function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
         />
       </label>
-      {err && <p className="text-sm text-red-600">{err}</p>}
       <button className="btn-primary w-full">登录</button>
       <p className="text-sm text-slate-500">
         没有账号？ <Link href="/register" className="text-brand-700">注册</Link>
       </p>
     </form>
+    <ErrorDialog open={Boolean(err)} description={err} onClose={() => setErr("")} />
+    </>
   );
 }
 
