@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, setToken } from "@/lib/api";
+import { ErrorDialog } from "@/components/ErrorDialog";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function RegisterPage() {
   }
 
   return (
+    <>
     <form onSubmit={onSubmit} className="card mx-auto max-w-md space-y-4 p-6 sm:p-8">
       <h1 className="text-xl font-semibold">注册</h1>
       <label className="block space-y-1.5">
@@ -64,11 +66,12 @@ export default function RegisterPage() {
           minLength={8}
         />
       </label>
-      {err && <p className="text-sm text-red-600">{err}</p>}
       <button className="btn-primary w-full">创建账号</button>
       <p className="text-sm text-slate-500">
         已有账号？ <Link href="/login" className="text-brand-700">登录</Link>
       </p>
     </form>
+    <ErrorDialog open={Boolean(err)} description={err} onClose={() => setErr("")} />
+    </>
   );
 }
