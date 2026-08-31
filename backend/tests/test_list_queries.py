@@ -75,7 +75,11 @@ async def test_plaza_batches_avg_rating(client: AsyncClient, session_factory):
     assert res.status_code == 200
     body = res.json()
     assert body["code"] == 0
-    by_id = {row["id"]: row for row in body["data"]}
+    payload = body["data"]
+    assert payload["page"] == 1
+    assert payload["page_size"] == 20
+    assert payload["total"] == 5
+    by_id = {row["id"]: row for row in payload["items"]}
     for quiz in quizzes:
         assert by_id[quiz.id]["avg_rating"] == 4.0
         assert by_id[quiz.id]["title"] == quiz.title
@@ -202,7 +206,7 @@ async def test_plaza_lists_quiz_with_only_visibility_public(client: AsyncClient,
     assert res.status_code == 200
     body = res.json()
     assert body["code"] == 0
-    by_id = {row["id"]: row for row in body["data"]}
+    by_id = {row["id"]: row for row in body["data"]["items"]}
     assert quiz_id in by_id
     assert by_id[quiz_id]["title"] == "仅 visibility 公开"
 
@@ -255,7 +259,7 @@ async def test_patch_visibility_roundtrips_plaza(client: AsyncClient, session_fa
     assert pub_body["is_public"] is True
 
     plaza = await client.get("/api/plaza")
-    assert any(row["id"] == quiz_id for row in plaza.json()["data"])
+    assert any(row["id"] == quiz_id for row in plaza.json()["data"]["items"])
 
     hidden = await client.patch(
         f"/api/quizzes/{quiz_id}",
@@ -268,4 +272,141 @@ async def test_patch_visibility_roundtrips_plaza(client: AsyncClient, session_fa
     assert hid_body["is_public"] is False
 
     plaza_after = await client.get("/api/plaza")
-    assert all(row["id"] != quiz_id for row in plaza_after.json()["data"])
+    assert all(row["id"] != quiz_id for row in plaza_after.json()["data"]["items"])
+
+
+async def test_plaza_paginates_and_does_not_repeat_pages(client: AsyncClient, session_factory):
+    data = await register(client, "plaza-page@example.com")
+    creator_id = await _user_id(client, data["token"])
+    quizzes = await _seed_public_quizzes(session_factory, creator_id, 5)
+
+    page1 = await client.get("/api/plaza?page=1&page_size=2")
+    assert page1.status_code == 200
+    body1 = page1.json()["data"]
+    assert body1["page"] == 1
+    assert body1["page_size"] == 2
+    assert body1["total"] == 5
+    assert len(body1["items"]) == 2
+
+    page2 = await client.get("/api/plaza?page=2&page_size=2")
+    assert page2.status_code == 200
+    body2 = page2.json()["data"]
+    assert body2["page"] == 2
+    assert body2["total"] == 5
+    assert len(body2["items"]) == 2
+
+    ids1 = {row["id"] for row in body1["items"]}
+    ids2 = {row["id"] for row in body2["items"]}
+    assert ids1.isdisjoint(ids2)
+
+    page3 = await client.get("/api/plaza?page=3&page_size=2")
+    body3 = page3.json()["data"]
+    assert len(body3["items"]) == 1
+    all_ids = ids1 | ids2 | {row["id"] for row in body3["items"]}
+    assert all_ids == {quiz.id for quiz in quizzes}
+
+
+async def test_plaza_categories_only_ready_and_from_db(client: AsyncClient, session_factory):
+    data = await register(client, "plaza-cats@example.com")
+    creator_id = await _user_id(client, data["token"])
+    async with session_factory() as db:
+        ready_civics = QuizSet(
+            creator_id=creator_id,
+            title="常识公开",
+            category="常识",
+            visibility="public",
+            status="ready",
+        )
+        ready_it = QuizSet(
+            creator_id=creator_id,
+            title="IT公开",
+            category="IT",
+            visibility="public",
+            status="ready",
+        )
+        generating = QuizSet(
+            creator_id=creator_id,
+            title="生成中不应出现",
+            category="考研",
+            visibility="public",
+            status="generating",
+        )
+        private_ready = QuizSet(
+            creator_id=creator_id,
+            title="私密不应出现",
+            category="历史",
+            visibility="private",
+            status="ready",
+        )
+        db.add_all([ready_civics, ready_it, generating, private_ready])
+        await db.commit()
+
+    cats = await client.get("/api/plaza/categories")
+    assert cats.status_code == 200
+    by_cat = {row["category"]: row["count"] for row in cats.json()["data"]}
+    assert by_cat.get("常识") == 1
+    assert by_cat.get("IT") == 1
+    assert "考研" not in by_cat
+    assert "历史" not in by_cat
+
+
+async def test_plaza_search_ranks_all_matches_before_pagination(
+    client: AsyncClient, session_factory, monkeypatch
+):
+    data = await register(client, "plaza-rank@example.com")
+    creator_id = await _user_id(client, data["token"])
+    async with session_factory() as db:
+        hot = QuizSet(
+            creator_id=creator_id,
+            title="热门叶绿体简介",
+            description="叶绿体",
+            category="常识",
+            visibility="public",
+            status="ready",
+            plays=100,
+            likes=100,
+        )
+        mid = QuizSet(
+            creator_id=creator_id,
+            title="次热叶绿体笔记",
+            description="叶绿体",
+            category="常识",
+            visibility="public",
+            status="ready",
+            plays=50,
+            likes=50,
+        )
+        relevant = QuizSet(
+            creator_id=creator_id,
+            title="叶绿体是光合作用的主要场所",
+            description="叶绿体",
+            category="常识",
+            visibility="public",
+            status="ready",
+            plays=0,
+            likes=0,
+        )
+        db.add_all([hot, mid, relevant])
+        await db.commit()
+        relevant_id, hot_id, mid_id = relevant.id, hot.id, mid.id
+
+    def _rank_relevant_first(docs: list[dict], query: str) -> list[str]:
+        assert query == "叶绿体"
+        ids = [doc["id"] for doc in docs]
+        return [relevant_id] + [doc_id for doc_id in ids if doc_id != relevant_id]
+
+    monkeypatch.setattr("app.api.plaza._plaza_rank_ids", _rank_relevant_first)
+
+    page1 = await client.get("/api/plaza?q=叶绿体&page=1&page_size=1")
+    assert page1.status_code == 200
+    body1 = page1.json()["data"]
+    assert body1["total"] == 3
+    assert [row["id"] for row in body1["items"]] == [relevant_id]
+
+    page2 = await client.get("/api/plaza?q=叶绿体&page=2&page_size=1")
+    page3 = await client.get("/api/plaza?q=叶绿体&page=3&page_size=1")
+    ranked_ids = [row["id"] for row in page1.json()["data"]["items"]]
+    ranked_ids += [row["id"] for row in page2.json()["data"]["items"]]
+    ranked_ids += [row["id"] for row in page3.json()["data"]["items"]]
+    assert ranked_ids[0] == relevant_id
+    assert set(ranked_ids) == {relevant_id, hot_id, mid_id}

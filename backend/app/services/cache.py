@@ -10,31 +10,6 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def chunk_cache_key(text: str, config: dict) -> str:
-    payload = json.dumps({"t": text, "c": config}, ensure_ascii=False, sort_keys=True)
-    return "gencache:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-async def get_cached_questions(text: str, config: dict) -> list[dict] | None:
-    redis = get_redis()
-    raw = await redis.get(chunk_cache_key(text, config))
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-
-
-async def set_cached_questions(text: str, config: dict, questions: list[dict]) -> None:
-    redis = get_redis()
-    await redis.set(
-        chunk_cache_key(text, config),
-        json.dumps(questions, ensure_ascii=False),
-        ex=60 * 60 * 24 * 7,
-    )
-
-
 def doc_quiz_cache_key(owner_id: str, content_sha: str, generation_config: dict) -> str:
     payload = json.dumps(
         {"owner_id": owner_id, "content_sha": content_sha, "config": generation_config},
