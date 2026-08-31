@@ -84,6 +84,8 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         if quiz:
             quiz.subject = subject
             quiz.blueprint = blueprint.model_dump(mode="json")
+            if quiz.status != "ready":
+                quiz.status = "generating"
 
         reused_id = None
         if doc.content_hash and not force:

@@ -86,6 +86,17 @@ def _source_passage(doc: Document | None, question: Question) -> str:
     return str((doc.extracted_text if doc else "") or (question.source_span or {}).get("quote") or question.content)
 
 
+async def _question_counts(db: AsyncSession, quiz_ids: list[str]) -> dict[str, int]:
+    if not quiz_ids:
+        return {}
+    rows = await db.execute(
+        select(Question.quiz_set_id, func.count())
+        .where(Question.quiz_set_id.in_(quiz_ids))
+        .group_by(Question.quiz_set_id)
+    )
+    return {quiz_id: int(n) for quiz_id, n in rows.all()}
+
+
 def _quiz_out(quiz: QuizSet, extra: dict | None = None) -> dict:
     data = {
         "id": quiz.id,
@@ -162,7 +173,7 @@ async def generate(
         subject=body.subject if body.subject != "auto" else "general",
         visibility=body.visibility,
         is_public=body.visibility == "public",
-        status="draft",
+        status="generating",
         blueprint=body.blueprint.model_dump(),
     )
     db.add(quiz)
@@ -212,7 +223,10 @@ async def my_favorites(
         .join(Favorite, Favorite.quiz_set_id == QuizSet.id)
         .where(Favorite.user_id == user.id, QuizSet.status != "failed")
     )
-    return ok([_quiz_out(quiz, {"favorited": True}) for quiz in rows.scalars().all()])
+quizzes = list(rows.scalars().all())
+counts = await _question_counts(db, [q.id for q in quizzes])
+return ok([_quiz_out(quiz, {"favorited": True, "question_count": counts.get(quiz.id, 0)}) for quiz in quizzes])
+
 
 
 @router.get("")
@@ -227,8 +241,10 @@ async def my_quizzes(
     )
     quizzes = list(rows.scalars().all())
     visible = [q for q in quizzes if q.status != "failed"]
-    fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
-    return ok([_quiz_out(q, {"favorited": q.id in fav_ids}) for q in visible])
+fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
+counts = await _question_counts(db, [q.id for q in visible])
+return ok([_quiz_out(q, {"favorited": q.id in fav_ids, "question_count": counts.get(q.id, 0)}) for q in visible])
+
 
 
 @router.get("/{quiz_id}")
@@ -245,6 +261,7 @@ async def get_quiz(
         select(Question).where(Question.quiz_set_id == quiz.id).order_by(Question.created_at)
     )
     questions = [_q_out(q) for q in qrows.scalars().all()]
+    actual_count = len(questions)
     if purpose == "practice":
         questions = [q for q in questions if is_practice_eligible(q)]
     fav_ids: set[str] = set()
@@ -274,7 +291,7 @@ async def get_quiz(
                     for part in q["subparts"]
                     if isinstance(part, dict)
                 ]
-    return ok(_quiz_out(quiz, {"questions": questions}))
+    return ok(_quiz_out(quiz, {"questions": questions, "question_count": actual_count}))
 
 
 @router.patch("/{quiz_id}")

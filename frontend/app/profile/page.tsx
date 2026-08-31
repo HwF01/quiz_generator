@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { quizStatusLabel } from "@/lib/labels";
+import { isQuizWaitingForQuestions, quizQuestionCountLabel } from "@/lib/quiz-status";
 
 type Quiz = {
   id: string;
@@ -17,8 +18,11 @@ type Quiz = {
   question_count: number;
   visibility: string;
   category: string;
-  favorited: boolean;
+favorited: boolean;
   is_builtin: boolean;
+  generation_job_id?: string | null;
+  blueprint?: { total_questions?: number } | null;
+
 };
 
 type Play = {
@@ -75,6 +79,7 @@ export default function ProfilePage() {
   const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
   const [pendingQuizId, setPendingQuizId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const hasInflight = quizzes.some((q) => isQuizWaitingForQuestions(q));
 
   useEffect(() => {
     if (!getToken()) {
@@ -87,6 +92,18 @@ export default function ProfilePage() {
       api<Play[]>("/plays").then(setPlays).catch(() => setPlays([])),
     ]).finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (!hasInflight) return;
+    const timer = setInterval(() => {
+      api<Quiz[]>("/quizzes")
+        .then(setQuizzes)
+        .catch(() => {
+          /* keep showing last snapshot through transient errors */
+        });
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [hasInflight]);
 
   async function openDetail(playId: string) {
     setDetailError("");
@@ -186,7 +203,7 @@ export default function ProfilePage() {
                 </div>
               </div>
               <p className="mt-2 text-sm text-slate-500">
-                {q.category} · {q.question_count} 题 · {q.visibility === "public" ? "公开" : "私密"}
+                {q.category} · {quizQuestionCountLabel(q)} · {q.visibility === "public" ? "公开" : "私密"}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Link className="btn-ghost" href={`/quizzes/${q.id}`}>
