@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
+import { generateSubmitLabel, isGenerateSubmitLocked, isJobInFlight } from "@/lib/generate-button";
 import { isUnnamedTitle, nextUnnamedTitle, withDuplicateSuffix } from "@/lib/quiz-title";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { SetupStatus } from "@/lib/labels";
@@ -87,8 +88,12 @@ export default function UploadPage() {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const titleTouchedRef = useRef(false);
   const titlesCacheRef = useRef<string[] | null>(null);
+  const submitLockRef = useRef(false);
+  const selectionRef = useRef(0);
   const showDifficulty = subjectTags.some((tag) => ["it", "math", "logic"].includes(tag));
   const manualCountTotal = useMemo(() => countTotal(typeCounts), [typeCounts]);
+  const jobInFlight = isJobInFlight(job?.status);
+  const submitLocked = isGenerateSubmitLocked(busy, job?.status);
 
   useEffect(() => {
     if (!getToken()) router.push("/login");
@@ -110,9 +115,11 @@ export default function UploadPage() {
 
   useEffect(() => {
     if (!job || job.status === "succeeded" || job.status === "failed") return;
+    let cancelled = false;
     const t = setInterval(async () => {
       try {
         const next = await api<Job>(`/jobs/${job.id}`);
+        if (cancelled) return;
         setJob(next);
         if (next.status === "succeeded" && next.quiz_set_id) {
           router.push(`/quizzes/${next.quiz_set_id}`);
@@ -121,7 +128,10 @@ export default function UploadPage() {
         /* keep polling through transient proxy/500s */
       }
     }, 1500);
-    return () => clearInterval(t);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, [job, router]);
 
   function blueprint(mode: AllocationMode = allocationMode) {
@@ -171,6 +181,7 @@ export default function UploadPage() {
       setErr("各题型数量之和必须等于总题量");
       return;
     }
+    const selection = selectionRef.current;
     const gen = await api<{ job_id: string; quiz_id: string }>("/quizzes/generate", {
       method: "POST",
       body: JSON.stringify({
@@ -183,6 +194,7 @@ export default function UploadPage() {
         force,
       }),
     });
+    if (selection !== selectionRef.current) return;
     setJob({ id: gen.job_id, status: "queued", progress: 0, stage: "排队中", quiz_set_id: gen.quiz_id });
   }
 
@@ -198,7 +210,8 @@ export default function UploadPage() {
   }
 
   async function start() {
-    if (!file) return;
+    if (!file || submitLockRef.current || jobInFlight) return;
+    submitLockRef.current = true;
     setErr("");
     setNotice("");
     setBusy(true);
@@ -222,12 +235,14 @@ export default function UploadPage() {
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "上传失败");
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
   }
 
   async function confirmDuplicate() {
-    if (!dupPrompt || !file) return;
+    if (!dupPrompt || !file || submitLockRef.current || jobInFlight) return;
+    submitLockRef.current = true;
     const finalTitle = dupPrompt.resolved;
     setDupPrompt(null);
     setErr("");
@@ -238,6 +253,7 @@ export default function UploadPage() {
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "上传失败");
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
   }
@@ -270,12 +286,15 @@ export default function UploadPage() {
             accept=".pdf,.docx,.pptx,.txt,.md"
             className="file-input"
             onChange={(e) => {
+              selectionRef.current += 1;
               setFile(e.target.files?.[0] || null);
               setDocumentId(null);
               setPreview(null);
               setSubjectTags([]);
               setTypeCounts({});
               setNotice("");
+              setErr("");
+              setJob(null);
             }}
           />
         </label>
@@ -456,11 +475,13 @@ export default function UploadPage() {
         {notice && <p className="text-sm text-emerald-700" role="status" aria-live="polite">{notice}</p>}
         {err && <p className="text-sm text-red-600" role="alert">{err}</p>}
         <button
+          type="button"
           className="btn-primary w-full"
-          disabled={!file || busy || (allocationMode === "manual" && manualCountTotal !== total)}
+          disabled={!file || submitLocked || (allocationMode === "manual" && manualCountTotal !== total)}
+          aria-busy={submitLocked || undefined}
           onClick={start}
         >
-          {busy ? "提交中…" : documentId && preview ? "开始生成" : "解析并配置"}
+          {generateSubmitLabel({ busy, jobStatus: job?.status, hasPreview: Boolean(documentId && preview) })}
         </button>
       </div>
       <div className="card p-4 sm:p-6">
