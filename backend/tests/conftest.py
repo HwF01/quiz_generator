@@ -4,6 +4,8 @@ os.environ.setdefault("APP_ENV", "local")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-placeholder")
 os.environ.setdefault("MOCK_LLM", "true")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_quizgen.db")
+os.environ["EMBEDDING_PROVIDER"] = "local"
+os.environ.setdefault("QWEN_API_KEY", "")
 
 from collections.abc import AsyncGenerator
 

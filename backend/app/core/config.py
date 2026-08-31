@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-5"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    embedding_provider: str = "local"
-    embedding_model: str = "hashed-bigram"
+    embedding_provider: str = "auto"
+    embedding_model: str = "text-embedding-v3"
     tavily_api_key: str = ""
     tavily_max_results: int = 5
 
