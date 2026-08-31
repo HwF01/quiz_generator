@@ -348,3 +348,65 @@ async def test_plaza_categories_only_ready_and_from_db(client: AsyncClient, sess
     assert by_cat.get("IT") == 1
     assert "考研" not in by_cat
     assert "历史" not in by_cat
+
+
+async def test_plaza_search_ranks_all_matches_before_pagination(
+    client: AsyncClient, session_factory, monkeypatch
+):
+    data = await register(client, "plaza-rank@example.com")
+    creator_id = await _user_id(client, data["token"])
+    async with session_factory() as db:
+        hot = QuizSet(
+            creator_id=creator_id,
+            title="热门叶绿体简介",
+            description="叶绿体",
+            category="常识",
+            visibility="public",
+            status="ready",
+            plays=100,
+            likes=100,
+        )
+        mid = QuizSet(
+            creator_id=creator_id,
+            title="次热叶绿体笔记",
+            description="叶绿体",
+            category="常识",
+            visibility="public",
+            status="ready",
+            plays=50,
+            likes=50,
+        )
+        relevant = QuizSet(
+            creator_id=creator_id,
+            title="叶绿体是光合作用的主要场所",
+            description="叶绿体",
+            category="常识",
+            visibility="public",
+            status="ready",
+            plays=0,
+            likes=0,
+        )
+        db.add_all([hot, mid, relevant])
+        await db.commit()
+        relevant_id, hot_id, mid_id = relevant.id, hot.id, mid.id
+
+    def _rank_relevant_first(docs: list[dict], query: str) -> list[str]:
+        assert query == "叶绿体"
+        ids = [doc["id"] for doc in docs]
+        return [relevant_id] + [doc_id for doc_id in ids if doc_id != relevant_id]
+
+    monkeypatch.setattr("app.api.plaza._plaza_rank_ids", _rank_relevant_first)
+
+    page1 = await client.get("/api/plaza?q=叶绿体&page=1&page_size=1")
+    assert page1.status_code == 200
+    body1 = page1.json()["data"]
+    assert body1["total"] == 3
+    assert [row["id"] for row in body1["items"]] == [relevant_id]
+
+    page2 = await client.get("/api/plaza?q=叶绿体&page=2&page_size=1")
+    page3 = await client.get("/api/plaza?q=叶绿体&page=3&page_size=1")
+    ranked_ids = [row["id"] for row in page1.json()["data"]["items"]]
+    ranked_ids += [row["id"] for row in page2.json()["data"]["items"]]
+    ranked_ids += [row["id"] for row in page3.json()["data"]["items"]]
+    assert ranked_ids[0] == relevant_id
+    assert set(ranked_ids) == {relevant_id, hot_id, mid_id}

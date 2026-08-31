@@ -46,21 +46,24 @@ async def plaza(
         filters.append(or_(QuizSet.title.ilike(like), QuizSet.description.ilike(like)))
     total = int(await db.scalar(select(func.count(QuizSet.id)).where(*filters)) or 0)
     stmt = select(QuizSet).where(*filters)
-    if sort == "new":
-        stmt = stmt.order_by(QuizSet.created_at.desc())
-    else:
-        stmt = stmt.order_by(QuizSet.plays.desc(), QuizSet.likes.desc())
     offset = (page - 1) * page_size
-    rows = (await db.execute(stmt.offset(offset).limit(page_size))).scalars().all()
-
-    if q and rows:
-        docs = [
-            {"id": z.id, "text": f"{z.title} {z.description or ''} {z.category}"}
-            for z in rows
-        ]
-        ranked_ids = await asyncio.to_thread(_plaza_rank_ids, docs, q)
-        order = {i: n for n, i in enumerate(ranked_ids)}
-        rows = sorted(rows, key=lambda z: order.get(z.id, 999))
+    if q:
+        rows = list((await db.execute(stmt)).scalars().all())
+        if rows:
+            docs = [
+                {"id": z.id, "text": f"{z.title} {z.description or ''} {z.category}"}
+                for z in rows
+            ]
+            ranked_ids = await asyncio.to_thread(_plaza_rank_ids, docs, q)
+            by_id = {z.id: z for z in rows}
+            rows = [by_id[qid] for qid in ranked_ids if qid in by_id]
+        rows = rows[offset : offset + page_size]
+    else:
+        if sort == "new":
+            stmt = stmt.order_by(QuizSet.created_at.desc())
+        else:
+            stmt = stmt.order_by(QuizSet.plays.desc(), QuizSet.likes.desc())
+        rows = (await db.execute(stmt.offset(offset).limit(page_size))).scalars().all()
 
     fav_ids = set()
     if user:
