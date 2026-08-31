@@ -10,7 +10,7 @@ import { ErrorDialog } from "@/components/ErrorDialog";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { quizStatusLabel } from "@/lib/labels";
-import { isQuizWaitingForQuestions, quizQuestionCountLabel } from "@/lib/quiz-status";
+import { isFailedQuiz, isQuizWaitingForQuestions, quizQuestionCountLabel } from "@/lib/quiz-status";
 
 type Quiz = {
   id: string;
@@ -133,6 +133,24 @@ export default function ProfilePage() {
     setPendingQuizId(quizId);
   }
 
+  async function retryQuiz(quizId: string) {
+    setQuizError("");
+    setBusyId(quizId);
+    try {
+      await api(`/quizzes/${quizId}/retry`, { method: "POST", body: JSON.stringify({}) });
+      const [nextQuizzes, nextMe] = await Promise.all([
+        api<Quiz[]>("/quizzes"),
+        api<typeof me>("/auth/me"),
+      ]);
+      setQuizzes(nextQuizzes);
+      setMe(nextMe);
+    } catch (e) {
+      setQuizError(e instanceof Error ? e.message : "重试失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function confirmRemoveQuiz() {
     if (!pendingQuizId) return;
     setQuizError("");
@@ -212,6 +230,16 @@ export default function ProfilePage() {
                 <Link className="btn-ghost" href={`/quizzes/${q.id}`}>
                   查看
                 </Link>
+                {isFailedQuiz(q.status) ? (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={busyId === q.id}
+                    onClick={() => void retryQuiz(q.id)}
+                  >
+                    {busyId === q.id ? "提交中…" : "用同一文档重试"}
+                  </button>
+                ) : null}
                 {q.is_builtin ? null : (
                   <button
                     type="button"

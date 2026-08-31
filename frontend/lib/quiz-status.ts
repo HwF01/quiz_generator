@@ -2,6 +2,14 @@ export function isQuizInFlight(status: string): boolean {
   return status === "generating" || status === "draft";
 }
 
+export function isFailedQuiz(status: string): boolean {
+  return status === "failed";
+}
+
+export function isListedForPractice(quiz: { status: string }): boolean {
+  return !isFailedQuiz(quiz.status);
+}
+
 export function isQuizWaitingForQuestions(quiz: {
   status: string;
   question_count?: number;

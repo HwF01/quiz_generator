@@ -1,5 +1,27 @@
 export type ApiEnvelope<T> = { code: number; data: T; message: string };
 
+export class ApiError extends Error {
+  readonly code: number;
+  readonly data: unknown;
+
+  constructor(message: string, code: number, data: unknown = null) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.data = data;
+  }
+}
+
+export function generationIdsFromError(error: unknown): { job_id: string; quiz_id: string } | null {
+  if (!(error instanceof ApiError)) return null;
+  const data = error.data;
+  if (typeof data !== "object" || data === null) return null;
+  const jobId = "job_id" in data ? (data as { job_id: unknown }).job_id : null;
+  const quizId = "quiz_id" in data ? (data as { quiz_id: unknown }).quiz_id : null;
+  if (typeof jobId !== "string" || !jobId || typeof quizId !== "string" || !quizId) return null;
+  return { job_id: jobId, quiz_id: quizId };
+}
+
 const TOKEN_KEY = "quiz_token";
 
 export function getToken(): string | null {
@@ -82,7 +104,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(messageFromResponse(res.status, text));
   }
   if (!res.ok || json.code !== 0) {
-    throw new Error(json.message || messageFromResponse(res.status, text));
+    throw new ApiError(json.message || messageFromResponse(res.status, text), json.code, json.data);
   }
   return json.data;
 }

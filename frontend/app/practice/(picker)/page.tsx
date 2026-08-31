@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { quizStatusLabel } from "@/lib/labels";
-import { isQuizWaitingForQuestions, quizQuestionCountLabel } from "@/lib/quiz-status";
+import { isListedForPractice, isQuizWaitingForQuestions, quizQuestionCountLabel } from "@/lib/quiz-status";
 
 type Quiz = {
   id: string;
@@ -33,7 +33,7 @@ export default function PracticeIndexPage() {
       return;
     }
     api<Quiz[]>("/quizzes")
-      .then(setQuizzes)
+      .then((list) => setQuizzes(list.filter(isListedForPractice)))
       .catch((e) => setLoadError(e instanceof Error ? e.message : "加载题库失败"))
       .finally(() => setLoading(false));
   }, [router]);
