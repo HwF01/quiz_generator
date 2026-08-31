@@ -15,7 +15,7 @@ body {
 }
 
 .btn {
-  @apply inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition active:opacity-90 disabled:pointer-events-none disabled:cursor-not-allowed;
+  @apply inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition active:opacity-90 disabled:pointer-events-none disabled:cursor-not-allowed disabled:transition-none;
 }
 
 .btn-primary {

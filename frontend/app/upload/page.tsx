@@ -467,7 +467,7 @@ export default function UploadPage() {
           type="button"
           className="btn-primary w-full"
           disabled={!file || submitLocked || (allocationMode === "manual" && manualCountTotal !== total)}
-          aria-busy={submitLocked}
+          aria-busy={submitLocked || undefined}
           onClick={start}
         >
           {generateSubmitLabel({ busy, jobStatus: job?.status, hasPreview: Boolean(documentId && preview) })}
