@@ -171,10 +171,10 @@ export default function ProfilePage() {
     return (
       <div className="space-y-8">
         <div>
-          <h1 className="text-2xl font-semibold">我的题库</h1>
+          <h1 className="text-2xl font-semibold">题库管理/审校</h1>
           <p className="text-sm text-slate-500">正在加载你的题库与练习记录。</p>
         </div>
-        <ListSkeleton cards={3} label="正在加载我的题库" />
+        <ListSkeleton cards={3} label="正在加载题库管理" />
       </div>
     );
   }
@@ -182,9 +182,9 @@ export default function ProfilePage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold">{me?.nickname || "我的主页"}</h1>
+        <h1 className="text-2xl font-semibold">题库管理/审校</h1>
         <p className="text-sm text-slate-500">
-          {me?.email} · 今日剩余生成 {me?.quota?.remaining ?? "-"} / {me?.quota?.limit ?? "-"}
+          {me?.nickname || "我的主页"} · {me?.email} · 今日剩余生成 {me?.quota?.remaining ?? "-"} / {me?.quota?.limit ?? "-"}
         </p>
       </div>
       <section>

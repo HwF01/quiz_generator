@@ -121,7 +121,7 @@ export default function FavoritesPage() {
             </article>
           ))}
           {!loadError && quizFavs.length === 0 ? (
-            <p className="text-sm text-slate-500 md:col-span-2">还没有收藏题库。可在我的题库或广场收藏。</p>
+            <p className="text-sm text-slate-500 md:col-span-2">还没有收藏题库。可在题库管理/审校或广场收藏。</p>
           ) : null}
         </div>
       ) : null}

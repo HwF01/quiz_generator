@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, getToken } from "@/lib/api";
 import { filterByQuiz, groupByQuiz, uniqueQuizzes } from "@/lib/quiz-groups";
-import { formatOptionLabel } from "@/lib/options";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FavoriteButton } from "@/components/FavoriteButton";
@@ -20,8 +19,6 @@ type Row = {
   question: {
     id: string;
     content: string;
-    type?: string;
-    options: { key: string; text: string }[] | null;
     micro_skill: string;
     quiz_set_id: string;
   };
@@ -96,13 +93,6 @@ export default function WrongPage() {
                 <FavoriteButton favorited={r.favorited} onToggle={() => void toggleFav(r.question.id)} />
               </div>
               <p className="mt-2 break-words font-medium">{r.question.content}</p>
-              <ul className="mt-2 text-sm">
-                {(r.question.options || []).map((o) => (
-                  <li key={o.key} className="break-words">
-                    {formatOptionLabel(o, r.question.type, r.question.options)}
-                  </li>
-                ))}
-              </ul>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Link
                   className="btn-ghost"

@@ -332,7 +332,7 @@ export default function PracticePage() {
     return (
       <div className="card space-y-3 p-4 sm:p-6">
         <p>{qFilter ? "未找到要重练的题目。" : "题库中已没有题目。"}</p>
-        <Link className="btn-ghost" href={qFilter ? "/wrong" : `/quizzes/${id}`}>
+        <Link className="btn-ghost" href={qFilter ? "/wrong" : "/practice"}>
           {qFilter ? "返回错题本" : "返回题库"}
         </Link>
       </div>
