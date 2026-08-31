@@ -269,7 +269,11 @@ export default function UploadPage() {
               ? "当前为演示模式，不调用网络模型。"
               : `已配置${[setup.qwen_configured ? "通义千问" : null, setup.deepseek_configured ? "DeepSeek" : null]
                   .filter(Boolean)
-                  .join("、") || "出题服务"}。`}
+                  .join("、") || "出题服务"}。${
+                  setup.self_review
+                    ? " 仅一把 Key，干扰项与门控将换模型/温度自审（自审降级）。"
+                    : " 题干走一家，干扰项与门控走另一家。"
+                }`}
             {setup.tavily_configured ? " 联网补充可用。" : " 未填写 Tavily Key，不影响普通出题。"}
             <Link href="/settings" className="ml-1 text-brand-700">
               去设置
@@ -497,7 +501,16 @@ export default function UploadPage() {
             {job.models_used && (
               <div className="space-y-1 text-xs text-slate-500">
                 <p>
-                  出题 {job.models_used.generator} / 干扰项 {job.models_used.critic} / 科目 {job.models_used.subject}
+                  出题 {job.models_used.generator}
+                  {typeof job.models_used.generator_model === "string" && job.models_used.generator_model
+                    ? `（${job.models_used.generator_model}）`
+                    : ""}
+                  {" / "}干扰项 {job.models_used.critic}
+                  {typeof job.models_used.critic_model === "string" && job.models_used.critic_model
+                    ? `（${job.models_used.critic_model}）`
+                    : ""}
+                  {" / "}科目 {job.models_used.subject}
+                  {job.models_used.self_review === "true" ? " · 自审降级" : ""}
                 </p>
                 {typeof job.models_used.shortfall_reason === "string" && <p>{job.models_used.shortfall_reason}</p>}
               </div>
