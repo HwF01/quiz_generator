@@ -96,7 +96,7 @@ Postgres 路径用 Alembic：`alembic upgrade head`（当前 head 为 `006_list_
 | 本机 SQLite vs Docker Alembic | 本机 `create_all` 吃 ORM `ondelete`；Docker/Postgres 必须 `alembic upgrade head`（不要停在 002） |
 | 配额与 Redis | 真实 Redis 仍 fail-closed（挂了会 503）；`memory://` 视为可用，重启后当日配额重置 |
 | `SECRET_KEY` | 非 development/local/desktop 且仍是占位则拒绝启动 |
-| Embedding | 名称 `hashed-bigram`，不是真实 bge |
+| Embedding | 有 Qwen Key 且 `EMBEDDING_PROVIDER=auto` 时，GCRDG 过滤/排序走 DashScope `text-embedding-v3`；质量门控与检索仍用 `hashed-bigram`。无 Key 或桌面 `local` 时 GCRDG 也回退哈希向量 |
 | JWT | 仍是 Bearer + localStorage；middleware 只用 `quiz_auth` 存在性 cookie |
 | 健康检查 | `/health` 会 `SELECT 1` + Redis `PING`（内存实现恒成功） |
 

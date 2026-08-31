@@ -252,7 +252,6 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         quiz.blueprint = blueprint.model_dump(mode="json")
         if any(question.get("needs_review") for question in questions):
             quiz.visibility = "private"
-            quiz.is_public = False
         await remember_doc_quiz(job.user_id, doc.content_hash or content_hash(parsed_text), cache_config, quiz.id)
         await db.commit()
         await set_progress(

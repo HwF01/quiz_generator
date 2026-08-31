@@ -26,7 +26,7 @@ async def plaza(
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(QuizSet).where(
-        or_(QuizSet.is_public.is_(True), QuizSet.is_builtin.is_(True)),
+        or_(QuizSet.visibility == "public", QuizSet.is_builtin.is_(True)),
         QuizSet.status == "ready",
     )
     if category:
@@ -94,7 +94,7 @@ def _plaza_rank_ids(docs: list[dict], query: str) -> list[str]:
 async def categories(db: AsyncSession = Depends(get_db)):
     rows = await db.execute(
         select(QuizSet.category, func.count())
-        .where(or_(QuizSet.is_public.is_(True), QuizSet.is_builtin.is_(True)))
+        .where(or_(QuizSet.visibility == "public", QuizSet.is_builtin.is_(True)))
         .group_by(QuizSet.category)
     )
     return ok([{"category": c, "count": n} for c, n in rows.all()])

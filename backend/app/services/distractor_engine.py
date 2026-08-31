@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 
-from app.services.llm.embed import similarity
+from app.services.llm.embed import cosine, embed_texts, thresholds_for
 from app.services.jsonutil import parse_json
 from app.services.llm.router import complete_json, critic_provider
 from app.services.prompt_loader import load_prompt
 from app.services.ranker import rank_candidates
 
-ANSWER_SIM_TH = 0.86
-PAIR_SIM_TH = 0.9
-CONTEXT_SIM_TH = 0.12
 TF_TRUE = {"true", "t", "1", "yes", "正确", "对"}
 TF_FALSE = {"false", "f", "0", "no", "错误", "错"}
 GENERIC_DISTRACTOR_RE = re.compile(
@@ -48,28 +44,41 @@ def tf_option_label(option: dict) -> str:
     return "错"
 
 
-def filter_candidates(
+async def filter_candidates(
     candidates: list[dict],
     *,
     answer: str,
     stem: str,
     passage: str,
 ) -> list[dict]:
-    kept: list[dict] = []
+    prepared: list[dict] = []
     for cand in candidates:
         text = str(cand.get("text") or "").strip()
         if not text or _normalized(text) == _normalized(answer):
             continue
         if GENERIC_DISTRACTOR_RE.search(text):
             continue
-        # 仅作字面近似去重；同义性由 Critic 的候选验伪裁定。
-        if similarity(text, answer) >= ANSWER_SIM_TH:
+        prepared.append({**cand, "text": text})
+    if not prepared:
+        return []
+    context = f"{stem}\n{passage[:400]}"
+    vectors, backend = await embed_texts(
+        [answer, context, *[item["text"] for item in prepared]]
+    )
+    th = thresholds_for(backend)
+    answer_vec, context_vec = vectors[0], vectors[1]
+    kept: list[dict] = []
+    kept_vecs: list[object] = []
+    # 预过滤近重复与跑题；同义改写仍由 Critic 的候选验伪裁定。
+    for cand, vec in zip(prepared, vectors[2:]):
+        if cosine(vec, answer_vec) >= th.answer_sim:
             continue
-        if similarity(text, stem + "\n" + passage[:400]) < CONTEXT_SIM_TH:
+        if cosine(vec, context_vec) < th.context_sim:
             continue
-        if any(similarity(text, str(k.get("text"))) >= PAIR_SIM_TH for k in kept):
+        if any(cosine(vec, other) >= th.pair_sim for other in kept_vecs):
             continue
-        kept.append({**cand, "text": text})
+        kept.append(cand)
+        kept_vecs.append(vec)
     return kept
 
 
@@ -169,6 +178,7 @@ async def adversarial_fix(question: dict, passage: str, *, subject: str = "gener
         stem=str(question.get("content") or ""),
         answer=str((question.get("answer") or {}).get("texts", [""])[0] or ""),
         passage=passage,
+        subject=subject,
     )
     if critic_error:
         _add_review_reason(question, "critic_error")
@@ -223,16 +233,15 @@ async def build_choice_question(
         return _pack(stem_payload, None, structured_answer, None, chunk_id)
 
     cands = await overgenerate(stem, answer, passage, subject=subject)
-    filtered = await asyncio.to_thread(
-        filter_candidates, cands, answer=answer, stem=stem, passage=passage
+    filtered = await filter_candidates(
+        cands, answer=answer, stem=stem, passage=passage
     )
     validated, critic_error = await validate_candidates(
         filtered, stem=stem, answer=answer, passage=passage, subject=subject
     )
     if len(validated) < 3 and not critic_error:
         extra = await overgenerate(stem, answer, passage, subject=subject)
-        filtered = await asyncio.to_thread(
-            filter_candidates,
+        filtered = await filter_candidates(
             filtered + extra,
             answer=answer,
             stem=stem,
@@ -243,9 +252,7 @@ async def build_choice_question(
         )
         critic_error = retry_critic_error
     ranked = (
-        await asyncio.to_thread(
-            rank_candidates, validated, answer=answer, stem=stem, passage=passage
-        )
+        await rank_candidates(validated, answer=answer, stem=stem, passage=passage)
     )[:3]
     if len(ranked) < 3:
         draft = _pack(
