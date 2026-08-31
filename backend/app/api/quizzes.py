@@ -224,9 +224,9 @@ async def my_favorites(
         .join(Favorite, Favorite.quiz_set_id == QuizSet.id)
         .where(Favorite.user_id == user.id, QuizSet.status != "failed")
     )
-quizzes = list(rows.scalars().all())
-counts = await _question_counts(db, [q.id for q in quizzes])
-return ok([_quiz_out(quiz, {"favorited": True, "question_count": counts.get(quiz.id, 0)}) for quiz in quizzes])
+    quizzes = list(rows.scalars().all())
+    counts = await _question_counts(db, [q.id for q in quizzes])
+    return ok([_quiz_out(quiz, {"favorited": True, "question_count": counts.get(quiz.id, 0)}) for quiz in quizzes])
 
 
 
@@ -242,9 +242,9 @@ async def my_quizzes(
     )
     quizzes = list(rows.scalars().all())
     visible = [q for q in quizzes if q.status != "failed"]
-fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
-counts = await _question_counts(db, [q.id for q in visible])
-return ok([_quiz_out(q, {"favorited": q.id in fav_ids, "question_count": counts.get(q.id, 0)}) for q in visible])
+    fav_ids = await _favorited_quiz_ids(db, user.id, [q.id for q in visible])
+    counts = await _question_counts(db, [q.id for q in visible])
+    return ok([_quiz_out(q, {"favorited": q.id in fav_ids, "question_count": counts.get(q.id, 0)}) for q in visible])
 
 
 
