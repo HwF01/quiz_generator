@@ -264,9 +264,7 @@ async def run_generation(db: AsyncSession, job_id: str) -> None:
         job.error = str(exc)
         job.status = "failed"
         if quiz:
-            job.quiz_set_id = None
-            quiz.generation_job_id = None
-            await db.delete(quiz)
+            quiz.status = "failed"
         await db.commit()
         try:
             await decr_quota(job.user_id)

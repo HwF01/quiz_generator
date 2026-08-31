@@ -84,7 +84,7 @@ async def test_upload_storage_failure_is_json(client: AsyncClient, monkeypatch):
     assert body["message"] == "文件保存失败，请稍后重试"
 
 
-async def test_list_quizzes_skips_failed_without_write(client: AsyncClient, session_factory):
+async def test_list_quizzes_includes_failed_drafts_without_deleting(client: AsyncClient, session_factory):
     data = await register(client, "failedlist@example.com")
     token = data["token"]
     me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -110,7 +110,8 @@ async def test_list_quizzes_skips_failed_without_write(client: AsyncClient, sess
     res = await client.get("/api/quizzes", headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     titles = [q["title"] for q in res.json()["data"]]
-    assert titles == ["好的"]
+    assert set(titles) == {"坏的", "好的"}
+    assert len(titles) == 2
     async with session_factory() as db:
         rows = (
             await db.execute(select(QuizSet.title).where(QuizSet.creator_id == user_id))
