@@ -286,7 +286,7 @@ export default function QuizEditPage() {
         <div className="card space-y-3 p-4 sm:p-6">
           <p className="text-sm text-red-600">{loadError}</p>
           <Link className="btn-ghost" href="/profile">
-            返回我的题库
+            返回题库管理/审校
           </Link>
         </div>
       );
