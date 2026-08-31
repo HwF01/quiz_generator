@@ -5,7 +5,8 @@
 - 评估信息是否完整（能否支撑至少一题的全部必要信息）
 - 评估内容是否适切目标用户与科目
 - 适合考查哪些能力：识记 / 理解 / 应用 / 推断 / 概括
-- suggested_types 只能在 single_choice、true_false、fill_blank、application、proof、short_answer 中选择：
+- suggested_types 只能在 single_choice、multi_choice、true_false、fill_blank、application、proof、short_answer 中选择：
+  - 材料能支撑两条以上互异结论时，可建议 multi_choice
   - 自然科学/工科材料可建议 fill_blank 或 application
   - 数理材料可建议 proof
   - 文科材料可建议 fill_blank 或 short_answer

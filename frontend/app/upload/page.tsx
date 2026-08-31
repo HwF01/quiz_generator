@@ -34,6 +34,7 @@ type GenerationPreview = {
 
 const TYPE_LABELS: Record<string, string> = {
   single_choice: "单选题",
+  multi_choice: "多选题",
   true_false: "判断题",
   fill_blank: "填空题",
   application: "应用题",

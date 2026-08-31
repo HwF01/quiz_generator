@@ -370,6 +370,8 @@ async def patch_question(
             raise AppError("请先补全小问、正解和评分量规，再标记已审", code=400)
         if candidate.get("type") == "true_false":
             raise AppError("请先补全对/错选项并指定唯一正解，再标记已审", code=400)
+        if candidate.get("type") == "multi_choice":
+            raise AppError("请先补全 4 个不同选项并指定至少两个正解，再标记已审", code=400)
         raise AppError("请先补全 4 个不同选项并指定唯一正解，再标记已审", code=400)
     for field in (
         "content",
@@ -461,17 +463,30 @@ async def harden_question(
         raise AppError("无权操作", code=403, status_code=403)
     if quiz.is_builtin:
         raise AppError("内置题库不可修改", code=403, status_code=403)
-    if q.type != "single_choice":
-        raise AppError("仅单选题支持重新生成干扰项", code=400)
+    if q.type not in {"single_choice", "multi_choice"}:
+        raise AppError("仅单选和多选题支持重新生成干扰项", code=400)
     span = q.source_span or {}
     doc = await db.get(Document, quiz.document_id) if quiz.document_id else None
     passage = _source_passage(doc, q)
+    correct_texts = [
+        str(text).strip()
+        for text in ((q.answer or {}).get("texts") or [])
+        if str(text).strip()
+    ]
+    if q.options:
+        correct_keys = (q.answer or {}).get("keys") or []
+        from_options = [
+            str(opt.get("text") or "").strip()
+            for opt in q.options
+            if opt.get("key") in correct_keys and str(opt.get("text") or "").strip()
+        ]
+        if from_options:
+            correct_texts = from_options
     stem = {
         "stem": q.content,
         "type": q.type,
-        "correct_text": (q.answer or {}).get("texts", [""])[0]
-        if q.type != "true_false"
-        else ((q.answer or {}).get("keys") or ["对"])[0],
+        "correct_text": correct_texts[0] if correct_texts else "",
+        "correct_texts": correct_texts,
         "answer": q.answer,
         "explanation": q.explanation,
         "knowledge_tags": q.knowledge_tags,
@@ -480,11 +495,6 @@ async def harden_question(
         "cognitive_level": q.cognitive_level,
         "source_quote": span.get("quote"),
     }
-    if q.options:
-        correct_keys = (q.answer or {}).get("keys") or []
-        for opt in q.options:
-            if opt.get("key") in correct_keys:
-                stem["correct_text"] = opt.get("text")
     try:
         rebuilt = await build_choice_question(stem, passage, q.source_chunk_id or "")
         rebuilt = await apply_gates(rebuilt, passage)

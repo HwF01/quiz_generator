@@ -13,11 +13,12 @@ SKILL_DIFFICULTY = {
     "attitude": "medium",
 }
 
-TYPES = ["single_choice", "true_false"]
+TYPES = ["single_choice", "multi_choice", "true_false"]
 SKILLS_CYCLE = ["gist", "inference", "theme", "detail", "attitude", "cohesion"]
-_COMMON_TYPES = ("single_choice", "true_false")
+_COMMON_TYPES = ("single_choice", "multi_choice", "true_false")
 _TYPE_PRIORITY = {
     "single_choice": 6,
+    "multi_choice": 3,
     "true_false": 4,
     "fill_blank": 5,
     "application": 5,
@@ -35,6 +36,7 @@ _SUBJECT_TAG_ALIASES = {
 }
 _TYPE_ALIASES = {
     "单选": "single_choice",
+    "多选": "multi_choice",
     "判断": "true_false",
     "填空": "fill_blank",
     "应用": "application",

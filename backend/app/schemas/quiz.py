@@ -44,7 +44,8 @@ class QuizBlueprint(BaseModel):
     type_counts: dict[str, int] = Field(default_factory=dict)
     type_mix: dict[str, float] = Field(
         default_factory=lambda: {
-            "single_choice": 0.8,
+            "single_choice": 0.65,
+            "multi_choice": 0.15,
             "true_false": 0.2,
         }
     )

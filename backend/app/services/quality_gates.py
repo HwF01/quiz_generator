@@ -58,23 +58,26 @@ def choice_structure_valid(question: dict) -> bool:
         part_ids = {str(part.get("id") or "") for part in subparts if isinstance(part, dict)}
         answer_ids = {str(part.get("id") or "") for part in answers if isinstance(part, dict)}
         return bool(part_ids) and len(part_ids) == len(subparts) and part_ids == answer_ids
-    if question_type not in {"single_choice", "true_false"}:
+    if question_type not in {"single_choice", "multi_choice", "true_false"}:
         return True
     options = question.get("options") or []
     keys = (question.get("answer") or {}).get("keys") or []
-    expected_options = 4 if question_type == "single_choice" else 2
-    if len(options) != expected_options or len(keys) != 1:
+    expected_options = 4 if question_type != "true_false" else 2
+    min_keys, max_keys = (2, 3) if question_type == "multi_choice" else (1, 1)
+    if len(options) != expected_options or not (min_keys <= len(keys) <= max_keys):
         return False
     if any(not isinstance(option, dict) for option in options):
         return False
     option_keys = [str(option.get("key") or "") for option in options]
     option_texts = [_normalized(option.get("text")) for option in options]
+    key_values = [str(key) for key in keys]
     return (
         all(option_keys)
         and all(option_texts)
         and len(set(option_keys)) == expected_options
         and len(set(option_texts)) == expected_options
-        and keys[0] in option_keys
+        and len(set(key_values)) == len(key_values)
+        and all(key in option_keys for key in key_values)
     )
 
 
@@ -90,12 +93,13 @@ def unique_correct(question: dict) -> bool:
         return True
     correct = [o for o in options if o.get("key") in keys]
     wrong = [o for o in options if o.get("key") not in keys]
-    if not correct:
+    if not correct or len(correct) != len(keys):
         return False
-    ctext = correct[0].get("text") or ""
-    for w in wrong:
-        if similarity(ctext, w.get("text") or "") >= 0.88:
-            return False
+    for citem in correct:
+        ctext = citem.get("text") or ""
+        for w in wrong:
+            if similarity(ctext, w.get("text") or "") >= 0.88:
+                return False
     return True
 
 
@@ -103,7 +107,7 @@ def stem_leaks_answer(question: dict) -> bool:
     stem = question.get("content") or ""
     answer = question.get("answer") or {}
     texts = [str(t) for t in (answer.get("texts") or []) if t]
-    if question.get("type") != "single_choice":
+    if question.get("type") not in {"single_choice", "multi_choice"}:
         return False
     for t in texts:
         if len(t) >= 2 and t in stem:
@@ -155,7 +159,7 @@ async def apply_gates(
     usability = int((scores.get("usability") or 0) if critic_error else (scores.get("usability") or 3))
     if scores.get("answer_exists") is False:
         exists = False
-    check_distractors = question.get("type") == "single_choice"
+    check_distractors = question.get("type") in {"single_choice", "multi_choice"}
     invalid_distractor_keys = [
         str(key)
         for key in (scores.get("invalid_distractor_keys") or [])

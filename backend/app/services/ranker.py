@@ -3,26 +3,42 @@ from __future__ import annotations
 from app.services.llm.embed import cosine, embed_texts, thresholds_for
 
 
+def answer_texts(answer: str | list[str]) -> list[str]:
+    raw = answer if isinstance(answer, list) else [answer]
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in raw:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 async def rank_candidates(
     candidates: list[dict],
     *,
-    answer: str,
+    answer: str | list[str],
     stem: str,
     passage: str,
 ) -> list[dict]:
     if not candidates:
         return []
-    texts = [answer, stem, passage[:500], *[str(cand.get("text") or "") for cand in candidates]]
+    answers = answer_texts(answer) or [""]
+    texts = [*answers, stem, passage[:500], *[str(cand.get("text") or "") for cand in candidates]]
     vectors, backend = await embed_texts(texts)
     th = thresholds_for(backend)
-    ans_v, stem_v, pass_v = vectors[0], vectors[1], vectors[2]
+    n_answers = len(answers)
+    ans_vecs = vectors[:n_answers]
+    stem_v, pass_v = vectors[n_answers], vectors[n_answers + 1]
     scored = []
-    for cand, vec in zip(candidates, vectors[3:]):
+    for cand, vec in zip(candidates, vectors[n_answers + 2 :]):
         text = str(cand.get("text") or "")
-        sim_ans = cosine(vec, ans_v)
+        sim_ans = max(cosine(vec, ans_v) for ans_v in ans_vecs)
         sim_stem = cosine(vec, stem_v)
         sim_pass = cosine(vec, pass_v)
-        length_pen = abs(len(text) - len(answer)) / max(len(answer), 8)
+        length_pen = min(abs(len(text) - len(item)) / max(len(item), 8) for item in answers)
         score = (
             sim_stem * 0.35
             + sim_pass * 0.35

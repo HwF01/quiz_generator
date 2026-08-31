@@ -119,6 +119,98 @@ async def test_incomplete_choice_cannot_be_marked_reviewed(client, session_facto
     assert response.json()["message"] == "请先补全 4 个不同选项并指定唯一正解，再标记已审"
 
 
+async def _quiz_with_multi_choice(client, session_factory, *, complete: bool):
+    registered = await register(client, "multi-review@example.com")
+    token = registered["token"]
+    me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    user_id = me.json()["data"]["id"]
+    async with session_factory() as db:
+        quiz = QuizSet(creator_id=user_id, title="多选题审校", status="ready", visibility="private")
+        db.add(quiz)
+        await db.flush()
+        question = Question(
+            quiz_set_id=quiz.id,
+            type="multi_choice",
+            content="下列哪些是细胞器？",
+            options=(
+                [
+                    {"key": "A", "text": "叶绿体"},
+                    {"key": "B", "text": "线粒体"},
+                    {"key": "C", "text": "核糖体"},
+                    {"key": "D", "text": "高尔基体"},
+                ]
+                if complete
+                else None
+            ),
+            answer={"keys": ["A"] if not complete else ["A", "B"], "texts": ["叶绿体", "线粒体"]},
+            micro_skill="detail",
+            quality_scores={},
+            needs_review=True,
+        )
+        db.add(question)
+        await db.commit()
+        return token, quiz.id, question.id
+
+
+@pytest.mark.asyncio
+async def test_incomplete_multi_choice_cannot_be_marked_reviewed(client, session_factory):
+    token, _, question_id = await _quiz_with_multi_choice(client, session_factory, complete=False)
+
+    response = await client.patch(
+        f"/api/quizzes/questions/{question_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"needs_review": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "请先补全 4 个不同选项并指定至少两个正解，再标记已审"
+
+
+@pytest.mark.asyncio
+async def test_complete_multi_choice_can_be_marked_reviewed(client, session_factory):
+    token, _, question_id = await _quiz_with_multi_choice(client, session_factory, complete=True)
+
+    response = await client.patch(
+        f"/api/quizzes/questions/{question_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"needs_review": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["needs_review"] is False
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_play_requires_all_correct_keys(client, session_factory):
+    token, quiz_id, question_id = await _quiz_with_multi_choice(client, session_factory, complete=True)
+    headers = {"Authorization": f"Bearer {token}"}
+    reviewed = await client.patch(
+        f"/api/quizzes/questions/{question_id}",
+        headers=headers,
+        json={"needs_review": False},
+    )
+    assert reviewed.status_code == 200
+
+    submitted = await client.post(
+        f"/api/plays/{quiz_id}",
+        headers=headers,
+        json={"answers": {question_id: ["A", "B"]}, "time_spent": 5, "mode": "sequential"},
+    )
+    assert submitted.status_code == 200
+    payload = submitted.json()["data"]
+    assert payload["correct"] == 1
+    assert payload["score"] == 100.0
+
+    partial = await client.post(
+        f"/api/plays/{quiz_id}",
+        headers=headers,
+        json={"answers": {question_id: ["A"]}, "time_spent": 5, "mode": "sequential"},
+    )
+    assert partial.status_code == 200
+    assert partial.json()["data"]["correct"] == 0
+    assert partial.json()["data"]["score"] == 0.0
+
+
 async def _quiz_with_true_false(client, session_factory, *, complete: bool):
     registered = await register(client, "tf-review@example.com")
     token = registered["token"]

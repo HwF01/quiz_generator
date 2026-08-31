@@ -213,6 +213,10 @@ export function QuestionEditDialog({ question, busy, error, onClose, onSave }: P
       setLocalError("单选题只能有一个正解");
       return;
     }
+    if (question.type === "multi_choice" && (keys.length < 2 || keys.length > 3)) {
+      setLocalError("多选题需要 2 到 3 个正解");
+      return;
+    }
     const texts = cleaned.filter((o) => keys.includes(o.key)).map((o) => o.text);
     setLocalError("");
     onSave({
