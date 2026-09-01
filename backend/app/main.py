@@ -14,6 +14,7 @@ from app.core.exceptions import AppError, app_error_handler, ok, unhandled_error
 from app.core.redis import get_redis
 from app.db.base import Base
 from app.db.session import engine
+from app.db.sqlite_schema import drop_legacy_quiz_sets_is_public
 from app.models import *  # noqa: F401,F403
 from app.seed import seed
 from app.services.storage import ensure_bucket
@@ -27,6 +28,7 @@ async def lifespan(_app: FastAPI):
     if settings.database_url.startswith("sqlite"):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(drop_legacy_quiz_sets_is_public)
 
             def _ensure_wrong_starred(sync_conn):
                 from sqlalchemy import inspect
