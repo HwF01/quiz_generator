@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
 import { ListSkeleton } from "@/components/ListSkeleton";
+import { StartPracticeButton } from "@/components/StartPracticeButton";
 import { quizStatusLabel } from "@/lib/labels";
 import { isListedForPractice, isQuizWaitingForQuestions, quizQuestionCountLabel } from "@/lib/quiz-status";
 
@@ -60,15 +61,9 @@ export default function PracticeIndexPage() {
                   {q.category} · {quizQuestionCountLabel(q)}
                 </p>
                 <div className="mt-3">
-                  {ready ? (
-                    <Link className="btn-primary" href={`/practice/${q.id}`}>
-                      开始刷题
-                    </Link>
-                  ) : (
-                    <span className="btn-primary pointer-events-none opacity-50" aria-disabled="true">
-                      开始刷题
-                    </span>
-                  )}
+                  <StartPracticeButton quizId={q.id} disabled={!ready}>
+                    开始刷题
+                  </StartPracticeButton>
                 </div>
               </article>
             );

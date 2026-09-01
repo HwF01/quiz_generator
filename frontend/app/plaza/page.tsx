@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api, getToken } from "@/lib/api";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ListSkeleton } from "@/components/ListSkeleton";
+import { StartPracticeButton } from "@/components/StartPracticeButton";
 
 type Item = {
   id: string;
@@ -162,9 +163,7 @@ export default function PlazaPage() {
               {it.category} · {it.question_count} 题 · {it.plays} 次练习 · {it.likes} 收藏 · {it.avg_rating.toFixed(1)} 分
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Link className="btn-primary" href={`/practice/${it.id}`}>
-                刷题
-              </Link>
+              <StartPracticeButton quizId={it.id}>刷题</StartPracticeButton>
               <Link className="btn-ghost" href={`/quizzes/${it.id}`}>
                 查看
               </Link>

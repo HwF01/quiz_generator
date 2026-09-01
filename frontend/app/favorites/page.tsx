@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuizFilterTabs } from "@/components/QuizFilterTabs";
+import { StartPracticeButton } from "@/components/StartPracticeButton";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { microSkillLabel } from "@/lib/labels";
 
@@ -111,9 +112,7 @@ export default function FavoritesPage() {
                 {q.category} · {q.question_count} 题 · {q.visibility === "public" ? "公开" : "私密"}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Link className="btn-primary" href={`/practice/${q.id}`}>
-                  刷题
-                </Link>
+                <StartPracticeButton quizId={q.id}>刷题</StartPracticeButton>
                 <Link className="btn-ghost" href={`/quizzes/${q.id}`}>
                   查看
                 </Link>

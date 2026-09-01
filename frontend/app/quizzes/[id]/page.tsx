@@ -9,6 +9,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { QuestionEditDialog, type QuestionPatch } from "@/components/QuestionEditDialog";
 import { ErrorDialog } from "@/components/ErrorDialog";
 import { ListSkeleton } from "@/components/ListSkeleton";
+import { StartPracticeButton } from "@/components/StartPracticeButton";
 import { microSkillLabel, quizStatusLabel } from "@/lib/labels";
 import { isQuizWaitingForQuestions } from "@/lib/quiz-status";
 
@@ -351,16 +352,9 @@ export default function QuizEditPage() {
               {retrying ? "提交中…" : "用同一文档重试"}
             </button>
           ) : (
-            <Link
-              className={`btn-primary ${inFlight ? "pointer-events-none opacity-50" : ""}`}
-              href={`/practice/${quiz.id}`}
-              aria-disabled={inFlight}
-              onClick={(event) => {
-                if (inFlight) event.preventDefault();
-              }}
-            >
+            <StartPracticeButton quizId={quiz.id} disabled={inFlight}>
               开始刷题
-            </Link>
+            </StartPracticeButton>
           )}
           <button
             className="btn-ghost"

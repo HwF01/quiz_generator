@@ -11,6 +11,12 @@ import { PlayDetailCards, type PlayDetail } from "@/components/PlayDetailDialog"
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDialog } from "@/components/ErrorDialog";
 import { CardSkeleton } from "@/components/ListSkeleton";
+import {
+  StartPracticeDialog,
+  parsePracticeMode,
+  practiceHref,
+  type PracticeMode,
+} from "@/components/StartPracticeDialog";
 import { microSkillLabel } from "@/lib/labels";
 
 type Question = {
@@ -100,7 +106,9 @@ export default function PracticePage() {
   const [rating, setRating] = useState(0);
   const [rateBusy, setRateBusy] = useState(false);
   const [rateMsg, setRateMsg] = useState("");
-  const [mode, setMode] = useState<"sequential" | "random">("sequential");
+  const [mode, setMode] = useState<PracticeMode | null>(null);
+  const modeRef = useRef<PracticeMode | null>(null);
+  const [pendingMode, setPendingMode] = useState(false);
   const [qFilter, setQFilter] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -116,7 +124,21 @@ export default function PracticePage() {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const params = new URLSearchParams(search);
     const filter = params.get("q") || params.get("question") || params.get("question_id");
+    const parsedMode = parsePracticeMode(params.get("mode"));
     setQFilter(filter);
+    if (filter) {
+      modeRef.current = "sequential";
+      setMode("sequential");
+      setPendingMode(false);
+    } else if (parsedMode) {
+      modeRef.current = parsedMode;
+      setMode(parsedMode);
+      setPendingMode(false);
+    } else {
+      modeRef.current = null;
+      setMode(null);
+      setPendingMode(true);
+    }
     Promise.all([
       api<Quiz>(`/quizzes/${id}?purpose=practice`),
       api<{ id: string }>("/auth/me").catch(() => null),
@@ -124,26 +146,32 @@ export default function PracticePage() {
       const questions = filter ? raw.questions.filter((x) => x.id === filter) : raw.questions;
       originalRef.current = questions;
       setMeId(me?.id ?? null);
-      setQuiz({ ...raw, questions });
+      const ordered = modeRef.current === "random" ? shuffle(questions) : questions;
+      setQuiz({ ...raw, questions: ordered });
       setIdx(0);
     }).catch((e) => {
       setLoadError(e instanceof Error ? e.message : "加载失败");
     });
-    // 只依赖 id：切顺序/随机只 shuffle 本地副本，不重拉。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, router]);
+
+  const modeReady = mode !== null;
 
   useEffect(() => {
-    if (result) return;
+    if (result || !modeReady || !quiz) return;
     const t = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(t);
-  }, [result]);
+  }, [result, modeReady, quiz]);
 
-  function applyMode(next: "sequential" | "random") {
+  function confirmFallbackMode(next: PracticeMode) {
+    modeRef.current = next;
     setMode(next);
-    setIdx(0);
+    setPendingMode(false);
     const base = originalRef.current;
-    setQuiz((q) => (q ? { ...q, questions: next === "random" ? shuffle(base) : [...base] } : q));
+    if (base.length > 0) {
+      setQuiz((q) => (q ? { ...q, questions: next === "random" ? shuffle(base) : [...base] } : q));
+      setIdx(0);
+    }
+    router.replace(practiceHref(id, next));
   }
 
   const q = quiz?.questions[idx];
@@ -248,7 +276,7 @@ export default function PracticePage() {
         body: JSON.stringify({
           answers,
           time_spent: seconds,
-          mode: qFilter ? "wrong_retry" : mode,
+          mode: qFilter ? "wrong_retry" : (mode ?? "sequential"),
           ...(question_ids ? { question_ids } : {}),
         }),
       });
@@ -328,7 +356,16 @@ export default function PracticePage() {
         </div>
       );
     }
-    return <CardSkeleton lines={6} />;
+    return (
+      <>
+        <CardSkeleton lines={6} />
+        <StartPracticeDialog
+          open={pendingMode}
+          onCancel={() => router.push("/practice")}
+          onConfirm={confirmFallbackMode}
+        />
+      </>
+    );
   }
   if (!q) {
     return (
@@ -338,6 +375,19 @@ export default function PracticePage() {
           {qFilter ? "返回错题本" : "返回题库"}
         </Link>
       </div>
+    );
+  }
+
+  if (pendingMode || !mode) {
+    return (
+      <>
+        <CardSkeleton lines={6} />
+        <StartPracticeDialog
+          open
+          onCancel={() => router.push("/practice")}
+          onConfirm={confirmFallbackMode}
+        />
+      </>
     );
   }
 
@@ -432,14 +482,6 @@ export default function PracticePage() {
           <span className="shrink-0">
             {progress} · {seconds}s
           </span>
-          <select
-            className="input w-28"
-            value={mode}
-            onChange={(e) => applyMode(e.target.value as "sequential" | "random")}
-          >
-            <option value="sequential">顺序</option>
-            <option value="random">随机</option>
-          </select>
         </div>
       </div>
       <p className="break-words text-lg">{q.content}</p>
