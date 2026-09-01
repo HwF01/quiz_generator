@@ -7,9 +7,27 @@ from app.services.jsonutil import parse_json
 from app.services.llm.router import complete_json, generator_provider
 from app.services.prompt_loader import load_prompt
 
+_TF_QUESTION_MARK = re.compile(r"[？?]")
+_TF_CHOICE_STEM = re.compile(r"是否正确|对不对|正确的是|正确的有|下列哪|下列有关|下列关于")
+_TF_TRAILING_PUNCT = re.compile(r"[。．.！!…]+$")
+_TF_PARTICLE_END = re.compile(r"[吗么呢]$")
+
 
 def _normalized(text: object) -> str:
     return re.sub(r"\s+", "", str(text or ""))
+
+
+def _true_false_stem_is_statement(stem: object) -> bool:
+    text = str(stem or "").strip()
+    if not text:
+        return False
+    compact = _normalized(text)
+    if _TF_QUESTION_MARK.search(text):
+        return False
+    if _TF_CHOICE_STEM.search(compact):
+        return False
+    stripped = _TF_TRAILING_PUNCT.sub("", compact)
+    return not _TF_PARTICLE_END.search(stripped)
 
 
 def _quote_in_passage(quote: object, passage: str) -> bool:
@@ -35,7 +53,8 @@ def valid_stem_payload(payload: object, passage: str) -> bool:
     if question_type == "true_false":
         keys = (payload.get("answer") or {}).get("keys") or []
         return bool(
-            str(payload.get("correct_text") or "").strip()
+            _true_false_stem_is_statement(payload.get("stem"))
+            and str(payload.get("correct_text") or "").strip()
             and len(keys) == 1
             and str(keys[0]) in {"对", "错"}
         )
